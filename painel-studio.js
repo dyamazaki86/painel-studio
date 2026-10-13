@@ -2,11 +2,27 @@
 let selectedLibraryId = null;
 let libraryTargetRailId = null;
 let libraryDragId = null;
+let selectedIds = new Set();
+const workspaceMargin = 300;
+$('#board').style.overflow='visible';
 const transparentDragImage = new Image();
 transparentDragImage.src = 'data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=';
 let customDrag = null;
+let selectionBox = null;
+let dragRenderFrame = 0;
 let copyBuffer = null;
 let showRulers = true;
+function historyState(){return {parts,placed,panelW:$('#panelW').value,panelH:$('#panelH').value,panelName:$('#panelName').value,panelColor,gridSpacing,showGrid}}
+let undoStack=[],lastHistoryState=JSON.parse(JSON.stringify(historyState())),historyActionOpen=false,historyActionRecorded=false,historySuppressed=false;
+function finishUndoAction(){historyActionOpen=false;historyActionRecorded=false;lastHistoryState=JSON.parse(JSON.stringify(historyState()))}
+function undoLastAction(){
+  const previous=undoStack.pop();if(!previous)return;
+  parts=JSON.parse(JSON.stringify(previous.parts||parts));placed=JSON.parse(JSON.stringify(previous.placed||[]));
+  $('#panelW').value=previous.panelW||600;$('#panelH').value=previous.panelH||800;$('#panelName').value=previous.panelName||'QD-01';panelColor=previous.panelColor||'';gridSpacing=previous.gridSpacing||10;$('#gridSpacing').value=gridSpacing;showGrid=previous.showGrid??showGrid;$('#gridToggle').classList.toggle('on',showGrid);
+  syncPanelColorPalette();
+  selectedIds=new Set([...selectedIds].filter(id=>placed.some(part=>part.id===id)));selected=selectedIds.has(selected)?selected:[...selectedIds].at(-1)||null;selectedLibraryId=null;
+  historySuppressed=true;markDirty();historySuppressed=false;finishUndoAction();renderLibrary();render();toast('Última ação desfeita.');
+}
 function escapeText(value) { return String(value).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 const assetHandleDbName='painel-studio-file-handles';
 let cachedProjectDirectory=null;
@@ -64,7 +80,7 @@ const markDirtyBase = markDirty;
 markDirty = function markDirtyAndAutosave() {
   markDirtyBase();
   try {
-    const data = { parts, placed, panelW: $('#panelW').value, panelH: $('#panelH').value, panelName: $('#panelName').value };
+    const data = { parts, placed, panelW: $('#panelW').value, panelH: $('#panelH').value, panelName: $('#panelName').value, panelColor, gridSpacing };
     const active=savedProjects.find(project=>project.id===activeProjectId);
     if(active){active.data=data;active.updatedAt=new Date().toISOString();localStorage.setItem(projectArchiveKey,JSON.stringify(savedProjects));localStorage.setItem('painel-studio-v1',JSON.stringify({projectId:active.id}));}
     else localStorage.setItem('painel-studio-v1', JSON.stringify(data));
@@ -73,6 +89,12 @@ markDirty = function markDirtyAndAutosave() {
     $('#saveState').textContent = 'Erro ao salvar';
     console.warn('Não foi possível salvar o projeto automaticamente.', error);
   }
+};
+const markDirtyWithAutosave=markDirty;
+markDirty=function markDirtyWithUndo(){
+  const next=JSON.stringify(historyState()),previous=JSON.stringify(lastHistoryState);
+  if(!historySuppressed&&next!==previous){if(!historyActionOpen||!historyActionRecorded){undoStack.push(JSON.parse(previous));if(undoStack.length>100)undoStack.shift();historyActionRecorded=true}lastHistoryState=JSON.parse(next)}
+  markDirtyWithAutosave();
 };
 // Canaletas têm uma seção fixa e apenas o comprimento é variável.
 const channelProfiles = window.PANEL_STUDIO_CHANNEL_PROFILES || [];
@@ -90,21 +112,27 @@ placed.forEach(p => {
   const size = p.fixedSection || [30, 50, 80].sort((a,b) => Math.abs(a-(p.h||40))-Math.abs(b-(p.h||40)))[0];
   p.channelProfile = true; p.fixedSection = size; p.h = size; p.resizable = true; p.rot = false;
 });
+undoStack=[];lastHistoryState=JSON.parse(JSON.stringify(historyState()));
 
 const renderBase = window.render;
 window.render = function renderOverride() {
   renderBase();
+  if(placed.some(item=>item.id===selected&&item.type==='rail'))selectedIds.clear();
   decorateRails();
   decorateImages();
   decorateChannel();
   decorateAnchors();
   decorateRulers();
+  svg.querySelectorAll('g.part[data-id]').forEach(group=>{if(selectedIds.has(group.dataset.id))group.classList.add('selected')});
+  if(selectedIds.size>1){const note=document.createElement('div');note.className='item-sub';note.style.cssText='padding:8px 17px 0;font-weight:600';note.textContent=`${selectedIds.size} componentes selecionados · Ctrl+clique para ajustar a seleção`;$('#properties').prepend(note)}
 };
+function syncPanelColorPalette(){document.querySelectorAll('#panelColorPalette [data-panel-color]').forEach(button=>button.setAttribute('aria-pressed',button.dataset.panelColor===(panelColor||'')?'true':'false'))}
 document.addEventListener('keydown', e => {
   const typing=e.target instanceof HTMLElement&&e.target.matches('input,textarea,select,[contenteditable="true"]');
+  if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='z'&&!typing){e.preventDefault();e.stopImmediatePropagation();undoLastAction();return}
   if((e.ctrlKey||e.metaKey)&&!typing&&e.key.toLowerCase()==='c'){
-    const p=placed.find(item=>item.id===selected);if(!p)return;
-    copyBuffer={...p};e.preventDefault();e.stopImmediatePropagation();toast('Componente copiado. Use Ctrl+V para colar.');return;
+    const selectedParts=placed.filter(item=>selectedIds.has(item.id));const p=placed.find(item=>item.id===selected);if(!selectedParts.length&&p)selectedParts.push(p);if(!selectedParts.length)return;
+    copyBuffer=selectedParts.map(item=>({...item}));e.preventDefault();e.stopImmediatePropagation();toast(`${selectedParts.length} componente(s) copiado(s). Use Ctrl+V para colar.`);return;
   }
   if((e.ctrlKey||e.metaKey)&&!typing&&e.key.toLowerCase()==='v'){
     if(!copyBuffer)return;e.preventDefault();e.stopImmediatePropagation();pasteCopiedComponent();return;
@@ -115,18 +143,10 @@ document.addEventListener('keydown', e => {
   const p=placed.find(item=>item.id===selected);
   if(!p||p.type==='rail')return;
   e.preventDefault();e.stopImmediatePropagation();
-  if(!canRotateWithoutOverlap(p)){toast('Rotação não permitida: causaria sobreposição.');return;}
   rotate();
 }, true);
-$('#properties').addEventListener('click',e=>{
-  if(!e.target.closest('#propRotate'))return;const p=placed.find(item=>item.id===selected);
-  if(p&&!canRotateWithoutOverlap(p)){e.preventDefault();e.stopImmediatePropagation();toast('Rotação não permitida: causaria sobreposição.');}
-},true);
-$('#rotateBtn').addEventListener('click',e=>{
-  const p=placed.find(item=>item.id===selected);
-  if(p&&!canRotateWithoutOverlap(p)){e.preventDefault();e.stopImmediatePropagation();toast('Rotação não permitida: causaria sobreposição.');}
-},true);
 $('#rulerToggle').onclick=e=>{showRulers=!showRulers;e.currentTarget.classList.toggle('on',showRulers);render()};
+$('#panelColorPalette').addEventListener('click',e=>{const button=e.target.closest('[data-panel-color]');if(!button)return;panelColor=button.dataset.panelColor;syncPanelColorPalette();markDirty();render()});syncPanelColorPalette();
 
 const projectListButton=document.createElement('button');
 projectListButton.className='btn';projectListButton.id='projectListBtn';projectListButton.title='Ver projetos salvos';projectListButton.textContent='▤ Projetos';
@@ -135,7 +155,7 @@ const projectModal=document.createElement('div');
 projectModal.className='modal-back';projectModal.id='projectArchiveModal';
 projectModal.innerHTML='<div class="modal" style="width:min(560px,calc(100vw - 32px));max-height:80vh;overflow:auto"><div style="display:flex;align-items:center;gap:10px"><h3 style="margin:0">Projetos salvos</h3><div class="grow"></div><button class="btn icon" id="closeProjectArchive" title="Fechar">×</button></div><div id="projectArchiveList" style="margin-top:14px"></div></div>';
 document.body.append(projectModal);
-function snapshotProject(){return {parts,placed,panelW:$('#panelW').value,panelH:$('#panelH').value,panelName:$('#panelName').value}}
+function snapshotProject(){return {parts,placed,panelW:$('#panelW').value,panelH:$('#panelH').value,panelName:$('#panelName').value,panelColor,gridSpacing}}
 function renderProjectArchive(){
   savedProjects=savedProjects.filter(project=>project&&project.id&&project.data);
   projectListButton.textContent=savedProjects.length?`▤ Projetos (${savedProjects.length})`:'▤ Projetos';
@@ -160,10 +180,11 @@ function saveProject(){
 function loadSavedProject(id){
   const project=savedProjects.find(item=>item.id===id);if(!project?.data)return;
   if(!activeProjectId&&dirty&&placed.length&&!confirm('Abrir outro projeto? O rascunho atual não está arquivado.'))return;
-  parts=JSON.parse(JSON.stringify(project.data.parts||parts));placed=JSON.parse(JSON.stringify(project.data.placed||[]));
-  $('#panelW').value=project.data.panelW||600;$('#panelH').value=project.data.panelH||800;$('#panelName').value=project.data.panelName||'QD-01';
+  parts=JSON.parse(JSON.stringify(project.data.parts||parts));placed=JSON.parse(JSON.stringify(project.data.placed||[]));selectedIds.clear();
+  $('#panelW').value=project.data.panelW||600;$('#panelH').value=project.data.panelH||800;$('#panelName').value=project.data.panelName||'QD-01';panelColor=project.data.panelColor||'';syncPanelColorPalette();gridSpacing=Math.max(5,Math.min(500,Math.round(+project.data.gridSpacing||10)));$('#gridSpacing').value=gridSpacing;
+  undoStack=[];finishUndoAction();
   activeProjectId=project.id;localStorage.setItem('painel-studio-active-project',activeProjectId);localStorage.setItem('painel-studio-v1',JSON.stringify({projectId:project.id}));
-  selected=null;selectedLibraryId=null;dirty=false;$('#saveState').textContent='Salvo';$('#projectName').textContent=project.name;
+  selected=null;selectedIds.clear();selectedLibraryId=null;dirty=false;$('#saveState').textContent='Salvo';$('#projectName').textContent=project.name;
   projectModal.style.display='none';renderLibrary();render();$('#fitBtn').click();toast('Projeto aberto');
 }
 function deleteSavedProject(id){
@@ -181,9 +202,9 @@ projectTitle.onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();projectTitle.b
 projectTitle.onblur=()=>{const name=projectTitle.textContent.trim()||'Novo projeto';projectTitle.textContent=name;const active=savedProjects.find(item=>item.id===activeProjectId);if(active){active.name=name;active.updatedAt=new Date().toISOString();try{localStorage.setItem(projectArchiveKey,JSON.stringify(savedProjects));renderProjectArchive();$('#saveState').textContent='Nome atualizado'}catch(error){console.warn('Não foi possível salvar o nome do projeto.',error)}}else{localStorage.setItem('painel-studio-draft-name',name)}};
 $('#newBtn').onclick=()=>{
   if(placed.length&&!confirm('Criar um novo projeto? O projeto salvo continua disponível na lista; o rascunho atual não será arquivado.'))return;
-  activeProjectId=null;localStorage.removeItem('painel-studio-active-project');placed=[];selected=null;selectedLibraryId=null;
-  $('#panelW').value=600;$('#panelH').value=800;$('#panelName').value='QD-01';$('#projectName').textContent='Novo projeto';localStorage.setItem('painel-studio-draft-name','Novo projeto');
-  dirty=false;render();markDirty();
+  activeProjectId=null;localStorage.removeItem('painel-studio-active-project');placed=[];selected=null;selectedIds.clear();selectedLibraryId=null;
+  $('#panelW').value=600;$('#panelH').value=800;$('#panelName').value='QD-01';panelColor='';syncPanelColorPalette();selectedIds.clear();gridSpacing=10;$('#gridSpacing').value=10;$('#projectName').textContent='Novo projeto';localStorage.setItem('painel-studio-draft-name','Novo projeto');
+  undoStack=[];finishUndoAction();dirty=false;render();markDirty();finishUndoAction();
 };
 if(activeProjectId){const active=savedProjects.find(project=>project.id===activeProjectId);if(active)$('#projectName').textContent=active.name}else $('#projectName').textContent=localStorage.getItem('painel-studio-draft-name')||'Novo projeto';
 renderProjectArchive();
@@ -206,7 +227,10 @@ function renderLibrary() {
       if(activeRail)libraryTargetRailId=activeRail.id;
       else if(selectedLibraryId!==el.dataset.id)libraryTargetRailId=null;
       selectedLibraryId = el.dataset.id;
-      selected = null;
+      // Preserve o trilho selecionado enquanto o usuário escolhe na biblioteca
+      // para adicionar vários componentes por duplo clique em sequência.
+      selected = activeRail?.id || null;
+      selectedIds.clear();
       document.querySelectorAll('#library .item').forEach(item => item.classList.toggle('selected', item === el));
       render();
     };
@@ -219,7 +243,7 @@ function renderLibrary() {
 function partSize(p, w=p.w, h=p.h) { return p.rot ? { w:h, h:w } : { w, h }; }
 function canOccupy(part, x, y, width=part.w, height=part.h) {
   const size=partSize(part,width,height), panelSize=panel();
-  if (x < 0 || y < 0 || x+size.w > panelSize.w || y+size.h > panelSize.h) return false;
+  if (x < -workspaceMargin || y < -workspaceMargin || x+size.w > panelSize.w+workspaceMargin || y+size.h > panelSize.h+workspaceMargin) return false;
   // Tolera somente sobreposições antigas que estejam sendo reduzidas, para
   // permitir corrigir projetos que já tinham componentes cruzados.
   return placed.every(other=>{
@@ -231,16 +255,29 @@ function canOccupy(part, x, y, width=part.w, height=part.h) {
 }
 function canRotateWithoutOverlap(part) {
   const current=partSize(part);part.rot=!part.rot;const next=partSize(part),{w,h}=panel();
-  const inPanel=part.x>=0&&part.y>=0&&part.x+next.w<=w&&part.y+next.h<=h;
+  const inWorkspace=part.x>=-workspaceMargin&&part.y>=-workspaceMargin&&part.x+next.w<=w+workspaceMargin&&part.y+next.h<=h+workspaceMargin;
   const clear=placed.every(other=>{
     if(other===part||other.type==='rail')return true;
     const os=partSize(other);
     const overlap=size=>Math.max(0,Math.min(part.x+size.w,other.x+os.w)-Math.max(part.x,other.x))*Math.max(0,Math.min(part.y+size.h,other.y+os.h)-Math.max(part.y,other.y));
     return overlap(next)<=overlap(current)+0.01;
   });
-  part.rot=!part.rot;return inPanel&&clear;
+  part.rot=!part.rot;return inWorkspace&&clear;
+}
+window.rotateSelectedComponents=function rotateSelectedComponents(){
+  const targets=placed.filter(part=>selectedIds.has(part.id)&&part.type!=='rail');
+  if(!targets.length){const part=placed.find(item=>item.id===selected&&item.type!=='rail');if(part)targets.push(part)}
+  if(!targets.length)return;
+  const moving=new Set(targets),before=targets.map(part=>({part,x:part.x,y:part.y,rot:part.rot}));placed=placed.filter(part=>!moving.has(part));
+  for(const item of before){const part=item.part;part.rot=!item.rot;const spot=findFreePosition(part,item.x,item.y);if(spot){part.x=spot.x;part.y=spot.y}else{part.rot=item.rot;part.x=item.x;part.y=item.y}placed.push(part)}
+  selected=targets[0].id;selectedIds=new Set(targets.map(part=>part.id));selectedLibraryId=null;markDirty();render();
+};
+function isChannel(part) {
+  return !!part?.channelProfile || /canaleta/i.test(part?.name || '');
 }
 function snapToRail(part, x, y) {
+  // Canaletas ocupam a placa livremente e nunca se vinculam a trilhos DIN.
+  if (isChannel(part)) return y;
   const {w:pw,h:ph}=partSize(part);
   const anchorX=x+pw/2;
   const anchorY=y+ph/2;
@@ -250,7 +287,7 @@ function snapToRail(part, x, y) {
 }
 function railAttachments(rail) {
   const rx=rail.x??35,length=rail.length??rail.w??0;
-  return placed.filter(part=>part.type!=='rail').filter(part=>{
+  return placed.filter(part=>part.type!=='rail'&&!isChannel(part)).filter(part=>{
     const size=partSize(part),cx=part.x+size.w/2,cy=part.y+size.h/2;
     return Math.abs(cy-rail.y)<1.5&&cx>=rx&&cx<=rx+length;
   }).map(part=>({part,x:part.x,y:part.y}));
@@ -260,7 +297,7 @@ function canTranslateAttached(attachments,dx,dy) {
   return attachments.every(item=>{
     const part=item.part;
     const size=partSize(part),x=item.x+dx,y=item.y+dy;
-    if(x<0||y<0||x+size.w>w||y+size.h>h)return false;
+    if(x< -workspaceMargin||y< -workspaceMargin||x+size.w>w+workspaceMargin||y+size.h>h+workspaceMargin)return false;
     return placed.every(other=>{
       if(moving.has(other)||other.type==='rail')return true;
       const os=partSize(other),area=(px,py)=>Math.max(0,Math.min(px+size.w,other.x+os.w)-Math.max(px,other.x))*Math.max(0,Math.min(py+size.h,other.y+os.h)-Math.max(py,other.y));
@@ -271,13 +308,13 @@ function canTranslateAttached(attachments,dx,dy) {
 function nearestFreePosition(part,desiredX,desiredY,fallbackX=part.x,fallbackY=part.y){
   const {w,h}=panel(),size=partSize(part),originalIndex=placed.indexOf(part);
   if(originalIndex>=0)placed.splice(originalIndex,1);
-  const maxX=Math.max(0,w-size.w),maxY=Math.max(0,h-size.h);
-  const baseX=Math.max(0,Math.min(maxX,Math.round(desiredX/5)*5)),baseY=Math.max(0,Math.min(maxY,Math.round(desiredY/5)*5));
-  const maxRing=Math.ceil(Math.max(maxX,maxY)/5),seen=new Set();let found=null;
+  const minX=-workspaceMargin,minY=-workspaceMargin,maxX=w+workspaceMargin-size.w,maxY=h+workspaceMargin-size.h;
+  const baseX=Math.max(minX,Math.min(maxX,Math.round(desiredX/5)*5)),baseY=Math.max(minY,Math.min(maxY,Math.round(desiredY/5)*5));
+  const maxRing=Math.ceil(Math.max(maxX-minX,maxY-minY)/5),seen=new Set();let found=null;
   for(let ring=0;ring<=maxRing&&!found;ring++){
     for(let dx=-ring;dx<=ring&&!found;dx++)for(let dy=-ring;dy<=ring;dy++){
       if(Math.max(Math.abs(dx),Math.abs(dy))!==ring)continue;
-      const x=baseX+dx*5,y=baseY+dy*5;if(x<0||y<0||x>maxX||y>maxY)continue;
+      const x=baseX+dx*5,y=baseY+dy*5;if(x<minX||y<minY||x>maxX||y>maxY)continue;
       const snappedY=snapToRail(part,x,y),key=`${x}:${snappedY}`;if(seen.has(key))continue;seen.add(key);
       if(canOccupy(part,x,snappedY)){found={x,y:snappedY};break}
     }
@@ -288,33 +325,42 @@ function nearestFreePosition(part,desiredX,desiredY,fallbackX=part.x,fallbackY=p
   return found;
 }
 function findFreePosition(part,x,y) {
-  const {w,h}=panel(),size=partSize(part),startX=Math.max(0,Math.min(w-size.w,x)),startY=Math.max(0,Math.min(h-size.h,y));
+  const {w,h}=panel(),size=partSize(part),minX=-workspaceMargin,minY=-workspaceMargin,maxX=w+workspaceMargin-size.w,maxY=h+workspaceMargin-size.h,startX=Math.max(minX,Math.min(maxX,x)),startY=Math.max(minY,Math.min(maxY,y));
   const snapped=snapToRail(part,startX,startY);
   if(canOccupy(part,startX,snapped))return {x:startX,y:snapped};
   for(let radius=10;radius<=Math.max(w,h);radius+=10)for(let dy=-radius;dy<=radius;dy+=10)for(let dx=-radius;dx<=radius;dx+=10){
     if(Math.max(Math.abs(dx),Math.abs(dy))!==radius)continue;
-    const xx=Math.max(0,Math.min(w-size.w,startX+dx)),yy=Math.max(0,Math.min(h-size.h,startY+dy)),sy=snapToRail(part,xx,yy);
+    const xx=Math.max(minX,Math.min(maxX,startX+dx)),yy=Math.max(minY,Math.min(maxY,startY+dy)),sy=snapToRail(part,xx,yy);
     if(canOccupy(part,xx,sy))return {x:xx,y:sy};
   }
-  for(let yy=0;yy<=h-size.h;yy+=10)for(let xx=0;xx<=w-size.w;xx+=10){const sy=snapToRail(part,xx,yy);if(canOccupy(part,xx,sy))return {x:xx,y:sy}}
+  for(let yy=minY;yy<=maxY;yy+=10)for(let xx=minX;xx<=maxX;xx+=10){const sy=snapToRail(part,xx,yy);if(canOccupy(part,xx,sy))return {x:xx,y:sy}}
   return null;
 }
 function pasteCopiedComponent(){
   if(!copyBuffer)return;
-  const source=placed.find(item=>item.id===copyBuffer.id)||copyBuffer;
-  const copy={...copyBuffer,id:'p'+Date.now()+Math.random().toString(16).slice(2,5),x:0,y:0};
-  const spot=copy.type==='rail'
-    ? {x:Math.max(0,Math.min(panel().w-(copy.length??copy.w),(source.x||0)+20)),y:Math.max(0,Math.min(panel().h,(source.y||0)+20))}
-    : findFreePosition(copy,(source.x||0)+20,(source.y||0)+20);
-  if(!spot){toast('Não há espaço livre para colar este componente.');return}
-  Object.assign(copy,spot);placed.push(copy);selected=copy.id;selectedLibraryId=null;copyBuffer={...copy};markDirty();render();toast('Componente colado.');
+  const sources=Array.isArray(copyBuffer)?copyBuffer:[copyBuffer],copies=sources.map(source=>({...source,id:'p'+Date.now()+Math.random().toString(16).slice(2,6),x:(source.x||0)+20,y:(source.y||0)+20}));
+  if(copies.length===1&&copies[0].type==='rail'){
+    const copy=copies[0];copy.x=Math.max(-workspaceMargin,Math.min(panel().w-(copy.length??copy.w),copy.x));copy.y=Math.max(-workspaceMargin,Math.min(panel().h,copy.y));placed.push(copy);
+  }else{
+    let placedTogether=false;const maxRing=Math.ceil(Math.max(panel().w,panel().h)/5)+workspaceMargin/5;
+    for(let ring=0;ring<=maxRing&&!placedTogether;ring++)for(let dx=-ring;dx<=ring&&!placedTogether;dx++)for(let dy=-ring;dy<=ring;dy++){
+      if(Math.max(Math.abs(dx),Math.abs(dy))!==ring)continue;
+      for(let i=0;i<copies.length;i++){copies[i].x=(sources[i].x||0)+20+dx*5;copies[i].y=(sources[i].y||0)+20+dy*5}
+      let valid=true;
+      for(const copy of copies){const size=partSize(copy);if(copy.x< -workspaceMargin||copy.y< -workspaceMargin||copy.x+size.w>panel().w+workspaceMargin||copy.y+size.h>panel().h+workspaceMargin||!canOccupy(copy,copy.x,copy.y)){valid=false;break}placed.push(copy)}
+      if(valid){placedTogether=true;break}
+      placed=placed.filter(item=>!copies.includes(item));
+    }
+    if(!placedTogether){toast('Não há espaço livre para colar a seleção.');return}
+  }
+  selectedIds=new Set(copies.filter(item=>item.type!=='rail').map(item=>item.id));selected=copies.at(-1)?.id||null;selectedLibraryId=null;copyBuffer=copies.map(item=>({...item}));markDirty();render();toast(`${copies.length} componente(s) colado(s).`);
 }
 window.placePart=function placePartWithoutOverlap(id,x,y){
   const def=parts.find(item=>item.id===id);if(!def)return;
   const obj={...def,id:'p'+Date.now()+Math.random().toString(16).slice(2,5),sourceId:def.id,x:0,y:0,rot:false};
   const spot=findFreePosition(obj,x??35,y??80);
   if(!spot){toast('Não há espaço livre para adicionar este componente.');return}
-  Object.assign(obj,spot);placed.push(obj);selected=obj.id;selectedLibraryId=null;markDirty();render();
+  Object.assign(obj,spot);placed.push(obj);selected=obj.id;selectedIds=new Set([obj.id]);selectedLibraryId=null;markDirty();render();
 };
 $('#duplicateBtn').addEventListener('click',e=>{
   const source=placed.find(item=>item.id===selected);if(!source||source.type==='rail')return;
@@ -322,7 +368,7 @@ $('#duplicateBtn').addEventListener('click',e=>{
   const copy={...source,id:'p'+Date.now()+Math.random().toString(16).slice(2,5),x:0,y:0};
   const spot=findFreePosition(copy,source.x+20,source.y+20);
   if(!spot){toast('Não há espaço livre para duplicar este componente.');return}
-  Object.assign(copy,spot);placed.push(copy);selected=copy.id;markDirty();render();
+  Object.assign(copy,spot);placed.push(copy);selected=copy.id;selectedIds=new Set([copy.id]);markDirty();render();
 },true);
 
 function renderProps() {
@@ -359,8 +405,9 @@ function renderProps() {
     $('#properties').innerHTML=`<div class="section"><div class="props-title">Trilho DIN 35 mm</div>
       <div class="item-sub" style="margin-top:4px">Arraste o trilho para mover; use as alças azuis nas pontas para redimensionar.</div>
       <div class="field-row"><div class="field"><div class="field-label">Comprimento</div><input id="railLength" type="number" min="70" value="${length}"><span class="unit">mm</span></div>
-      <div class="field"><div class="field-label">Posição X</div><input id="railX" type="number" value="${Math.round(p.x??35)}"></div></div>
-      <div class="field-label">Posição Y</div><div class="field"><input id="railY" type="number" value="${Math.round(p.y)}"><span class="unit">mm</span></div>
+      <div class="field"><div class="field-label">Largura</div><input type="number" value="35" readonly aria-label="Largura fixa do trilho DIN"><span class="unit">mm</span></div></div>
+      <div class="field-row"><div class="field"><div class="field-label">Posição X</div><input id="railX" type="number" value="${Math.round(p.x??35)}"><span class="unit">mm</span></div>
+      <div class="field"><div class="field-label">Posição Y</div><input id="railY" type="number" value="${Math.round(p.y)}"><span class="unit">mm</span></div></div>
       <div class="mini-actions"><button class="btn" id="propDelete">⌫ Excluir trilho</button></div></div>`;
     $('#railLength').onchange=e=>{p.length=Math.max(70,+e.target.value||70);p.w=p.length;p.x=Math.min(p.x??35,w-p.length);markDirty();render()};
     $('#railX').onchange=e=>{p.x=Math.max(0,Math.min(w-(p.length??p.w),+e.target.value||0));markDirty();render()};
@@ -387,9 +434,31 @@ function renderProps() {
 }
 
 function startMove(e,p) {
-  e.stopPropagation(); selected=p.id; selectedLibraryId=null;
-  customDrag={p,mode:e.target.classList.contains('channel-resize')?'resize':'move',x:p.x,y:p.y,w:p.w,h:p.h,sx:e.clientX,sy:e.clientY};
+  e.stopPropagation();
+  const additive=e.ctrlKey||e.metaKey||e.shiftKey;
+  if(additive&&selectedIds.has(p.id)){selectedIds.delete(p.id);selected=selectedIds.values().next().value||null;render();return}
+  if(additive)selectedIds.add(p.id);else if(!selectedIds.has(p.id))selectedIds=new Set([p.id]);
+  selected=p.id;selectedLibraryId=null;historyActionOpen=true;historyActionRecorded=false;
+  const items=[...selectedIds].map(id=>placed.find(item=>item.id===id)).filter(Boolean).map(part=>({part,x:part.x,y:part.y}));
+  customDrag={p,items,mode:e.target.classList.contains('channel-resize')?'resize':'move',x:p.x,y:p.y,w:p.w,h:p.h,sx:e.clientX,sy:e.clientY};
   svg.setPointerCapture(e.pointerId); render();
+}
+window.removeSelectedComponents=function removeSelectedComponents(){
+  const ids=selectedIds.size?selectedIds:new Set(selected?[selected]:[]);if(!ids.size)return;
+  placed=placed.filter(part=>!ids.has(part.id));selected=null;selectedIds.clear();selectedLibraryId=null;markDirty();render();
+};
+function nearestFreeGroupOffset(items){
+  const moving=new Set(items.map(item=>item.part)),original=items.map(item=>({part:item.part,x:item.part.x,y:item.part.y}));
+  placed=placed.filter(item=>!moving.has(item));
+  const maxRing=Math.ceil(Math.max(panel().w,panel().h)/5)+workspaceMargin/5;
+  for(let ring=0;ring<=maxRing;ring++)for(let dx=-ring;dx<=ring;dx++)for(let dy=-ring;dy<=ring;dy++){
+    if(Math.max(Math.abs(dx),Math.abs(dy))!==ring)continue;
+    const ox=dx*5,oy=dy*5,candidate=items.map(item=>({part:item.part,x:item.part.x+ox,y:item.part.y+oy}));let valid=true;
+    for(const item of candidate){const size=partSize(item.part);if(item.x< -workspaceMargin||item.y< -workspaceMargin||item.x+size.w>panel().w+workspaceMargin||item.y+size.h>panel().h+workspaceMargin||!canOccupy(item.part,item.x,item.y)){valid=false;break}placed.push(item.part);item.part.x=item.x;item.part.y=item.y}
+    if(valid)return true;
+    placed=placed.filter(item=>!moving.has(item));candidate.forEach((item,index)=>{items[index].part.x=original[index].x;items[index].part.y=original[index].y});
+  }
+  original.forEach(item=>{item.part.x=item.x;item.part.y=item.y;placed.push(item.part)});return false;
 }
 function decorateRails() {
   const {w}=panel();
@@ -442,7 +511,7 @@ function decorateChannel() {
   handle.setAttribute('x',p.channelProfile&&p.rot?size.w/2-5:size.w-5);handle.setAttribute('y',p.channelProfile?(p.rot?size.h-5:size.h/2-5):size.h-5);handle.setAttribute('width',10);handle.setAttribute('height',10);handle.setAttribute('fill','#4263eb');handle.style.cursor=p.channelProfile?(p.rot?'ns-resize':'ew-resize'):'nwse-resize';g.append(handle);
 }
 function decorateAnchors() {
-  const p=placed.find(item=>item.id===selected&&item.type!=='rail');if(!p)return;
+  const p=placed.find(item=>item.id===selected&&item.type!=='rail'&&!item.channelProfile&&!/canaleta/i.test(item.name||''));if(!p)return;
   const g=[...svg.children].find(el=>el.localName==='g'&&el.getAttribute('transform')===`translate(${p.x},${p.y})`);if(!g)return;
   const {w,h}=partSize(p),ns='http://www.w3.org/2000/svg';
   const halo=document.createElementNS(ns,'circle');halo.setAttribute('cx',w/2);halo.setAttribute('cy',h/2);halo.setAttribute('r',3.2);halo.setAttribute('fill','#fff');halo.setAttribute('fill-opacity','.72');halo.setAttribute('stroke','#3155c6');halo.setAttribute('stroke-opacity','.6');halo.setAttribute('stroke-width',.8);halo.setAttribute('pointer-events','none');
@@ -465,41 +534,73 @@ function decorateImages() {
 svg.addEventListener('pointerdown',e=>{
   const railGroup=e.target.closest('[data-rail-id]'),channelHandle=e.target.classList.contains('channel-resize');if(!railGroup&&!channelHandle)return;
   e.stopImmediatePropagation();e.preventDefault();
-  if(railGroup){const p=placed.find(x=>x.id===railGroup.dataset.railId),mode=e.target.classList.contains('left')?'left':e.target.classList.contains('right')?'right':'move';selected=p.id;selectedLibraryId=null;customDrag={p,mode,x:p.x??35,y:p.y,w:p.length??p.w??panel().w-70,h:0,attached:mode==='move'?railAttachments(p):[],sx:e.clientX,sy:e.clientY}}
-  else {const g=e.target.closest('g[transform]'),m=(g?.getAttribute('transform')||'').match(/translate\(([^,]+),([^\)]+)\)/),p=placed.find(x=>x.resizable&&m&&x.x==m[1]&&x.y==m[2]);if(!p)return;selected=p.id;customDrag={p,mode:p.channelProfile?'resize-length':'resize',x:p.x,y:p.y,w:p.w,h:p.h,sx:e.clientX,sy:e.clientY}}
+  historyActionOpen=true;historyActionRecorded=false;
+  if(railGroup){const p=placed.find(x=>x.id===railGroup.dataset.railId),mode=e.target.classList.contains('left')?'left':e.target.classList.contains('right')?'right':'move';selectedIds.clear();selected=p.id;selectedLibraryId=null;customDrag={p,mode,x:p.x??35,y:p.y,w:p.length??p.w??panel().w-70,h:0,attached:mode==='move'?railAttachments(p):[],sx:e.clientX,sy:e.clientY}}
+  else {const g=e.target.closest('g[transform]'),m=(g?.getAttribute('transform')||'').match(/translate\(([^,]+),([^\)]+)\)/),p=placed.find(x=>x.resizable&&m&&x.x==m[1]&&x.y==m[2]);if(!p)return;selectedIds=new Set([p.id]);selected=p.id;customDrag={p,items:[{part:p,x:p.x,y:p.y}],mode:p.channelProfile?'resize-length':'resize',x:p.x,y:p.y,w:p.w,h:p.h,sx:e.clientX,sy:e.clientY}}
   svg.setPointerCapture(e.pointerId);render();
 },true);
 svg.addEventListener('pointermove',e=>{
+  if(selectionBox){
+    const point=svgPointFromEvent(e),box=selectionBox;
+    const x=Math.min(box.start.x,point.x),y=Math.min(box.start.y,point.y),width=Math.abs(point.x-box.start.x),height=Math.abs(point.y-box.start.y);
+    box.rect.setAttribute('x',x);box.rect.setAttribute('y',y);box.rect.setAttribute('width',width);box.rect.setAttribute('height',height);
+    return;
+  }
   const d=customDrag;if(!d)return;const p=d.p,dx=(e.clientX-d.sx)/scale,dy=(e.clientY-d.sy)/scale,{w,h}=panel();
   if(d.mode==='resize'){const nw=Math.max(10,Math.round((d.w+dx)/5)*5),nh=Math.max(10,Math.round((d.h+dy)/5)*5);if(canOccupy(p,p.x,p.y,nw,nh)){p.w=nw;p.h=nh}}
   else if(d.mode==='resize-length'){const axis=p.rot?dy:dx,nw=Math.max(10,Math.round((d.w+axis)/5)*5);if(canOccupy(p,p.x,p.y,nw,p.fixedSection)){p.w=nw;p.h=p.fixedSection}}
-  else if(d.mode==='right'){p.length=Math.max(70,Math.min(w-(p.x??35),Math.round((d.w+dx)/5)*5));p.w=p.length}
-  else if(d.mode==='left'){const right=d.x+d.w,x=Math.max(0,Math.min(right-70,Math.round((d.x+dx)/5)*5));p.x=x;p.length=right-x;p.w=p.length}
+  else if(d.mode==='right'){p.length=Math.max(70,Math.min(w+workspaceMargin-(p.x??35),Math.round((d.w+dx)/5)*5));p.w=p.length}
+  else if(d.mode==='left'){const right=d.x+d.w,x=Math.max(-workspaceMargin,Math.min(right-70,Math.round((d.x+dx)/5)*5));p.x=x;p.length=right-x;p.w=p.length}
   else if(p.type==='rail'){
-    const nx=Math.max(0,Math.min(w-(p.length??p.w),Math.round((d.x+dx)/5)*5)),ny=Math.max(0,Math.min(h,Math.round((d.y+dy)/5)*5));
+    const nx=Math.max(-workspaceMargin,Math.min(w+workspaceMargin-(p.length??p.w),Math.round((d.x+dx)/5)*5)),ny=Math.max(-workspaceMargin,Math.min(h+workspaceMargin,Math.round((d.y+dy)/5)*5));
     if(d.mode==='move'&&d.attached?.length){const tx=nx-d.x,ty=ny-d.y;if(canTranslateAttached(d.attached,tx,ty)){p.x=nx;p.y=ny;d.attached.forEach(item=>{item.part.x=item.x+tx;item.part.y=item.y+ty})}}
     else {p.x=nx;p.y=ny}
   }
-  else {const size=partSize(p),nx=Math.max(0,Math.min(w-size.w,Math.round((d.x+dx)/5)*5)),ny=Math.max(0,Math.min(h-size.h,Math.round((d.y+dy)/5)*5));p.x=nx;p.y=snapToRail(p,nx,ny)}
-  markDirty();render();
+  else if(d.items?.length>1){for(const item of d.items){const size=partSize(item.part);item.part.x=Math.max(-workspaceMargin,Math.min(w+workspaceMargin-size.w,Math.round((item.x+dx)/5)*5));item.part.y=Math.max(-workspaceMargin,Math.min(h+workspaceMargin-size.h,Math.round((item.y+dy)/5)*5))}}
+  else {const size=partSize(p),nx=Math.max(-workspaceMargin,Math.min(w+workspaceMargin-size.w,Math.round((d.x+dx)/5)*5)),ny=Math.max(-workspaceMargin,Math.min(h+workspaceMargin-size.h,Math.round((d.y+dy)/5)*5));p.x=nx;p.y=snapToRail(p,nx,ny)}
+  if(!dragRenderFrame)dragRenderFrame=requestAnimationFrame(()=>{dragRenderFrame=0;render()});
 },true);
 svg.addEventListener('pointerup',e=>{
-  const d=customDrag;if(!d)return;customDrag=null;
-  if(d.p.type!=='rail'&&d.mode==='move'){
-    const result=nearestFreePosition(d.p,d.p.x,d.p.y,d.x,d.y);
-    if(!result)toast('Não há posição livre para soltar o componente.');
-    markDirty();render();
+  if(selectionBox){
+    const box=selectionBox;selectionBox=null;
+    if(svg.hasPointerCapture(e.pointerId))svg.releasePointerCapture(e.pointerId);
+    box.rect.remove();
+    const dragged=Math.hypot(e.clientX-box.screenX,e.clientY-box.screenY)>3;
+    if(dragged){
+      const point=svgPointFromEvent(e),minX=Math.min(box.start.x,point.x),minY=Math.min(box.start.y,point.y),maxX=Math.max(box.start.x,point.x),maxY=Math.max(box.start.y,point.y);
+      const contained=placed.filter(part=>part.type!=='rail').filter(part=>{const size=partSize(part);return part.x>=minX&&part.y>=minY&&part.x+size.w<=maxX&&part.y+size.h<=maxY}).map(part=>part.id);
+      selectedIds=box.additive?new Set([...selectedIds,...contained]):new Set(contained);
+      selected=contained.at(-1)||[...selectedIds].at(-1)||null;
+      selectedLibraryId=null;libraryTargetRailId=null;
+      document.querySelectorAll('#library .item').forEach(item=>item.classList.remove('selected'));
+    }else if(!box.additive){selected=null;selectedIds.clear();selectedLibraryId=null;libraryTargetRailId=null;document.querySelectorAll('#library .item').forEach(item=>item.classList.remove('selected'))}
+    render();return;
   }
+  const d=customDrag;if(!d)return;customDrag=null;
+  if(dragRenderFrame){cancelAnimationFrame(dragRenderFrame);dragRenderFrame=0}
+  if(d.p.type!=='rail'&&d.mode==='move'){
+    if(d.items?.length>1)nearestFreeGroupOffset(d.items);
+    else {const result=nearestFreePosition(d.p,d.p.x,d.p.y,d.x,d.y);if(!result)toast('Não há posição livre para soltar o componente.')}
+  }
+  markDirty();render();
+  finishUndoAction();
 },true);
 
 const oldRailButton=$('#railBtn'),railButton=oldRailButton.cloneNode(true);oldRailButton.replaceWith(railButton);
-railButton.addEventListener('click',()=>{const {w,h}=panel(),n=placed.filter(p=>p.type==='rail').length,len=Math.max(70,w-70),r={id:'r'+Date.now(),type:'rail',name:'Trilho DIN 35 mm',x:35,y:Math.round(h*(.28+.25*n)),w:len,length:len};placed.push(r);selected=r.id;selectedLibraryId=null;markDirty();render();toast('Trilho adicionado. Arraste para mover ou use as alças para ajustar o comprimento.')});
+railButton.addEventListener('click',()=>{const {w,h}=panel(),n=placed.filter(p=>p.type==='rail').length,len=Math.max(70,w-70),r={id:'r'+Date.now(),type:'rail',name:'Trilho DIN 35 mm',x:35,y:Math.round(h*(.28+.25*n)),w:len,length:len};placed.push(r);selected=r.id;selectedIds.clear();selectedLibraryId=null;markDirty();render();toast('Trilho adicionado. Arraste para mover ou use as alças para ajustar o comprimento.')});
 function addPartToSelectedRail(id,x,y){
   const rail=placed.find(item=>item.id===selected&&item.type==='rail')||placed.find(item=>item.id===libraryTargetRailId&&item.type==='rail');
   libraryTargetRailId=null;
   if(!rail){placePart(id,x,y);return}
   const def=parts.find(item=>item.id===id);if(!def)return;
   const railX=rail.x??35,railLength=rail.length??rail.w??0;
+  if(isChannel(def)){
+    const part={...def,id:'p'+Date.now()+Math.random().toString(16).slice(2,5),x:0,y:0,rot:false};
+    const spot=findFreePosition(part,railX+(railLength-part.w)/2,rail.y+20);
+    libraryTargetRailId=null;
+    if(!spot){selected=rail.id;render();toast('Não há espaço livre para adicionar a canaleta.');return}
+    Object.assign(part,spot);placed.push(part);selected=rail.id;selectedLibraryId=null;markDirty();render();return;
+  }
   if(def.w>railLength){selected=rail.id;render();toast('O componente é maior que o comprimento do trilho.');return}
   const part={...def,id:'p'+Date.now()+Math.random().toString(16).slice(2,5),x:0,y:rail.y-def.h/2,rot:false};
   const minX=railX,maxX=railX+railLength-def.w,preferredX=(minX+maxX)/2;
@@ -520,10 +621,10 @@ function addPartAtPointer(id,x,y){
   const def=parts.find(item=>item.id===id);if(!def)return;
   const part={...def,id:'p'+Date.now()+Math.random().toString(16).slice(2,5),x:0,y:0,rot:false};
   const size=partSize(part),{w,h}=panel();
-  const px=Math.max(0,Math.min(w-size.w,x-size.w/2)),py=Math.max(0,Math.min(h-size.h,y-size.h/2));
+  const px=Math.max(-workspaceMargin,Math.min(w+workspaceMargin-size.w,x-size.w/2)),py=Math.max(-workspaceMargin,Math.min(h+workspaceMargin-size.h,y-size.h/2));
   const snappedY=snapToRail(part,px,py);
   if(!canOccupy(part,px,snappedY)){toast('Não foi possível adicionar: a posição está ocupada.');return}
-  part.x=px;part.y=snappedY;placed.push(part);selected=part.id;selectedLibraryId=null;libraryTargetRailId=null;markDirty();render();
+  part.x=px;part.y=snappedY;placed.push(part);selected=part.id;selectedIds=new Set([part.id]);selectedLibraryId=null;libraryTargetRailId=null;markDirty();render();
 }
 let libraryDragPreview=null;
 function clearLibraryDragPreview(){libraryDragPreview?.remove();libraryDragPreview=null}
@@ -540,20 +641,24 @@ function updateLibraryDragPreview(event){
 $('#stage').addEventListener('dragover',updateLibraryDragPreview,true);
 $('#stage').addEventListener('dragleave',e=>{if(!e.relatedTarget||!e.currentTarget.contains(e.relatedTarget))clearLibraryDragPreview()},true);
 $('#stage').addEventListener('drop',e=>{const id=e.dataTransfer.getData('part')||e.dataTransfer.getData('text/plain')||libraryDragId;if(!id)return;e.preventDefault();e.stopImmediatePropagation();clearLibraryDragPreview();libraryDragId=null;const rect=svg.getBoundingClientRect(),{w,h}=panel();addPartAtPointer(id,(e.clientX-rect.left)/rect.width*w,(e.clientY-rect.top)/rect.height*h)},true);
-$('#createPart').onclick=()=>{const name=$('#mName').value.trim()||'Novo componente',cat=$('#mCat').value,p={id:'lib'+Date.now(),name,cat,w:+$('#mW').value||30,h:+$('#mH').value||50,color:['#ed956e','#5aa8d8','#a482d6','#55b89a'][parts.length%4],icon:'▦',resizable:name.toLowerCase().includes('canaleta')};parts.push(p);$('#modalBack').style.display='none';$('#mName').value='';selectedLibraryId=p.id;selected=null;markDirty();renderLibrary();renderProps()};
+$('#createPart').onclick=()=>{const name=$('#mName').value.trim()||'Novo componente',cat=$('#mCat').value,p={id:'lib'+Date.now(),name,cat,w:+$('#mW').value||30,h:+$('#mH').value||50,color:['#ed956e','#5aa8d8','#a482d6','#55b89a'][parts.length%4],icon:'▦',resizable:name.toLowerCase().includes('canaleta')};parts.push(p);$('#modalBack').style.display='none';$('#mName').value='';selectedLibraryId=p.id;selected=null;selectedIds.clear();markDirty();renderLibrary();renderProps()};
 const stage=$('#stage');
+function svgPointFromEvent(e){const point=svg.createSVGPoint();point.x=e.clientX;point.y=e.clientY;const matrix=svg.getScreenCTM();return matrix?point.matrixTransform(matrix.inverse()):{x:0,y:0}}
 svg.addEventListener('pointerdown',e=>{
   if(e.button!==0)return;
   if(e.target.closest('g[transform]')||e.target.closest('[data-rail-id]'))return;
-  if(selected!==null||selectedLibraryId!==null){selected=null;selectedLibraryId=null;libraryTargetRailId=null;document.querySelectorAll('#library .item').forEach(item=>item.classList.remove('selected'));render()}
+  e.preventDefault();e.stopImmediatePropagation();
+  const point=svgPointFromEvent(e),rect=document.createElementNS('http://www.w3.org/2000/svg','rect');
+  rect.setAttribute('x',point.x);rect.setAttribute('y',point.y);rect.setAttribute('width',0);rect.setAttribute('height',0);rect.setAttribute('fill','#4263eb');rect.setAttribute('fill-opacity','.10');rect.setAttribute('stroke','#4263eb');rect.setAttribute('stroke-width',1/scale);rect.setAttribute('stroke-dasharray',`${4/scale} ${3/scale}`);rect.setAttribute('pointer-events','none');svg.append(rect);
+  selectionBox={start:point,screenX:e.clientX,screenY:e.clientY,additive:e.ctrlKey||e.metaKey||e.shiftKey,rect};svg.setPointerCapture(e.pointerId);
 },true);
+svg.addEventListener('pointercancel',e=>{if(!selectionBox)return;selectionBox.rect.remove();selectionBox=null;if(svg.hasPointerCapture(e.pointerId))svg.releasePointerCapture(e.pointerId);render()},true);
 let panX=0,panY=0,panPointer=null;
 function applyPan(){const boardWrap=stage.querySelector('.board-wrap');if(boardWrap)boardWrap.style.transform=`translate(${panX}px,${panY}px)`}
 stage.addEventListener('pointerdown',e=>{if(e.button!==1)return;e.preventDefault();e.stopImmediatePropagation();panPointer=e.pointerId;stage.setPointerCapture(e.pointerId);stage.classList.add('panning');stage.dataset.panX=e.clientX;stage.dataset.panY=e.clientY},true);
 stage.addEventListener('pointermove',e=>{if(panPointer!==e.pointerId)return;const dx=e.clientX-(+stage.dataset.panX),dy=e.clientY-(+stage.dataset.panY);panX+=dx;panY+=dy;stage.dataset.panX=e.clientX;stage.dataset.panY=e.clientY;applyPan()},true);
 const stopPan=e=>{if(panPointer!==e.pointerId)return;panPointer=null;if(stage.hasPointerCapture(e.pointerId))stage.releasePointerCapture(e.pointerId);stage.classList.remove('panning')};stage.addEventListener('pointerup',stopPan,true);stage.addEventListener('pointercancel',stopPan,true);
-stage.addEventListener('wheel',e=>{e.preventDefault();const oldRect=svg.getBoundingClientRect(),anchorX=(e.clientX-oldRect.left)/scale,anchorY=(e.clientY-oldRect.top)/scale;scale=Math.max(.25,Math.min(1.5,scale*Math.exp(-e.deltaY*.001)));$('#zoomLabel').textContent=Math.round(scale*100)+'%';render();const newRect=svg.getBoundingClientRect();panX+=e.clientX-(newRect.left+anchorX*scale);panY+=e.clientY-(newRect.top+anchorY*scale);applyPan()},{passive:false});
+stage.addEventListener('wheel',e=>{e.preventDefault();const oldRect=svg.getBoundingClientRect(),anchorX=(e.clientX-oldRect.left)/scale,anchorY=(e.clientY-oldRect.top)/scale;scale=Math.max(.25,Math.min(2,scale*Math.exp(-e.deltaY*.001)));$('#zoomLabel').textContent=Math.round(scale*100)+'%';render();const newRect=svg.getBoundingClientRect();panX+=e.clientX-(newRect.left+anchorX*scale);panY+=e.clientY-(newRect.top+anchorY*scale);applyPan()},{passive:false});
 $('#fitBtn').onclick=()=>{panX=0;panY=0;const {w,h}=panel();scale=Math.max(.25,Math.min((stage.clientWidth-100)/w,(stage.clientHeight-100)/h,1));$('#zoomLabel').textContent=Math.round(scale*100)+'%';render();applyPan()};
 renderLibrary();render();
-
 
