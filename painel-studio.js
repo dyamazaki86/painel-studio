@@ -378,7 +378,11 @@ function decorateImages() {
     const size=partSize(p),clipId=`component-image-clip-${String(p.id).replace(/[^a-zA-Z0-9_-]/g,'')}`;
     const defs=document.createElementNS('http://www.w3.org/2000/svg','defs'),clip=document.createElementNS('http://www.w3.org/2000/svg','clipPath'),clipRect=document.createElementNS('http://www.w3.org/2000/svg','rect');
     clip.setAttribute('id',clipId);clip.setAttribute('clipPathUnits','userSpaceOnUse');clipRect.setAttribute('width',size.w);clipRect.setAttribute('height',size.h);clipRect.setAttribute('rx',2);clip.append(clipRect);defs.append(clip);g.append(defs);
-    const image=document.createElementNS('http://www.w3.org/2000/svg','image');image.setAttribute('x',0);image.setAttribute('y',0);image.setAttribute('width',size.w);image.setAttribute('height',size.h);image.setAttribute('href',p.image);image.setAttribute('preserveAspectRatio',p.imageFit==='contain'?'xMidYMid meet':'xMidYMid slice');image.setAttribute('clip-path',`url(#${clipId})`);image.setAttribute('pointer-events','none');g.append(image);
+    const image=document.createElementNS('http://www.w3.org/2000/svg','image');
+    const imageX=p.rot?(size.w-p.w)/2:0,imageY=p.rot?(size.h-p.h)/2:0;
+    image.setAttribute('x',imageX);image.setAttribute('y',imageY);image.setAttribute('width',p.rot?p.w:size.w);image.setAttribute('height',p.rot?p.h:size.h);
+    if(p.rot)image.setAttribute('transform',`rotate(90 ${size.w/2} ${size.h/2})`);
+    image.setAttribute('href',p.image);image.setAttribute('preserveAspectRatio',p.imageFit==='contain'?'xMidYMid meet':'xMidYMid slice');image.setAttribute('clip-path',`url(#${clipId})`);image.setAttribute('pointer-events','none');g.append(image);
     const frame=document.createElementNS('http://www.w3.org/2000/svg','rect');frame.setAttribute('x',0);frame.setAttribute('y',0);frame.setAttribute('width',size.w);frame.setAttribute('height',size.h);frame.setAttribute('rx',2);frame.setAttribute('fill','none');frame.setAttribute('stroke','none');frame.setAttribute('stroke-width',0);frame.setAttribute('pointer-events','none');g.append(frame);
   });
 }
