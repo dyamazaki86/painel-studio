@@ -1,9 +1,58 @@
 // Interaction improvements for the visual panel editor.
 let selectedLibraryId = null;
+let libraryTargetRailId = null;
+let libraryDragId = null;
+const transparentDragImage = new Image();
+transparentDragImage.src = 'data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=';
 let customDrag = null;
 let copyBuffer = null;
 let showRulers = true;
 function escapeText(value) { return String(value).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+const assetHandleDbName='painel-studio-file-handles';
+let cachedProjectDirectory=null;
+let uploadFolderReady=false;
+function openAssetHandleDb(){return new Promise((resolve,reject)=>{const request=indexedDB.open(assetHandleDbName,1);request.onupgradeneeded=()=>request.result.createObjectStore('handles');request.onsuccess=()=>resolve(request.result);request.onerror=()=>reject(request.error)})}
+async function readProjectDirectoryHandle(){if(cachedProjectDirectory)return cachedProjectDirectory;try{const db=await openAssetHandleDb();cachedProjectDirectory=await new Promise((resolve,reject)=>{const request=db.transaction('handles','readonly').objectStore('handles').get('project');request.onsuccess=()=>resolve(request.result||null);request.onerror=()=>reject(request.error)});db.close()}catch{}return cachedProjectDirectory}
+async function storeProjectDirectoryHandle(handle){cachedProjectDirectory=handle;try{const db=await openAssetHandleDb();await new Promise((resolve,reject)=>{const tx=db.transaction('handles','readwrite');tx.objectStore('handles').put(handle,'project');tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error)});db.close()}catch(error){console.warn('A pasta do projeto não pôde ser lembrada pelo navegador.',error)}}
+async function chooseProjectDirectory(){if(!window.showDirectoryPicker)return null;const handle=await window.showDirectoryPicker({id:'painel-studio-project',mode:'readwrite'});await storeProjectDirectoryHandle(handle);uploadFolderReady=true;await migrateEmbeddedImages(handle);return handle}
+async function getProjectDirectory(){if(!window.showDirectoryPicker)return null;let handle=await readProjectDirectoryHandle();if(handle){let permission=await handle.queryPermission({mode:'readwrite'});if(permission!=='granted')permission=await handle.requestPermission({mode:'readwrite'});if(permission==='granted')return handle;handle=null}return chooseProjectDirectory()}
+function prepareImageUploadPicker(input){input.addEventListener('click',event=>{if(!window.showDirectoryPicker||uploadFolderReady)return;event.preventDefault();getProjectDirectory().then(handle=>{if(handle){uploadFolderReady=true;toast('Pasta do projeto autorizada. Clique novamente para escolher a imagem.')}else toast('Não foi possível acessar a pasta do projeto. Tente novamente.')}).catch(error=>{if(error?.name!=='AbortError')console.warn('Não foi possível autorizar a pasta do projeto.',error);toast(error?.name==='AbortError'?'Seleção da pasta cancelada. Clique novamente para tentar.':'Não foi possível acessar a pasta do projeto.')})})}
+void readProjectDirectoryHandle();
+function fileToDataUrl(file){return new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(reader.result);reader.onerror=()=>reject(reader.error);reader.readAsDataURL(file)})}
+function imageFileExtension(file){const ext=(file.name.split('.').pop()||'').toLowerCase();if(['png','jpg','jpeg','webp','gif','svg','avif'].includes(ext))return ext;return ({'image/jpeg':'jpg','image/svg+xml':'svg','image/webp':'webp','image/gif':'gif','image/avif':'avif'}[file.type]||'png')}
+function imageFileStem(name){return String(name).normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'')||'componente'}
+async function migrateEmbeddedImages(root){
+  const groups=[{parts,placed},...savedProjects.filter(project=>project.data).map(project=>project.data)];
+  const references=new Map();let sequence=0;
+  for(const group of groups)for(const component of [...(group.parts||[]),...(group.placed||[])]){
+    const source=component.image;if(typeof source!=='string'||!source.startsWith('data:image/'))continue;
+    let path=references.get(source);
+    if(!path){const blob=await (await fetch(source)).blob(),mime=(blob.type||'image/png').split('/')[1].split('+')[0],extension=mime==='jpeg'?'jpg':(['png','jpg','webp','gif','svg','avif'].includes(mime)?mime:'png');
+      const fileName=`${imageFileStem(component.name)}-importado-${Date.now()}-${++sequence}.${extension}`;
+      const folder=await (await root.getDirectoryHandle('assets',{create:true})).getDirectoryHandle('components',{create:true});
+      const handle=await folder.getFileHandle(fileName,{create:true}),writer=await handle.createWritable();await writer.write(blob);await writer.close();path=`assets/components/${fileName}`;references.set(source,path);
+    }
+    component.image=path;
+  }
+  if(references.size){markDirty();localStorage.setItem(projectArchiveKey,JSON.stringify(savedProjects));renderLibrary();render();toast(`${references.size} imagem(ns) copiadas para assets/components`)}
+}
+async function saveComponentImage(file,component){
+  try{
+    const root=await getProjectDirectory();
+    if(!root)throw new Error('Este navegador não permite gravar arquivos na pasta do projeto.');
+    const assets=await root.getDirectoryHandle('assets',{create:true});
+    const folder=await assets.getDirectoryHandle('components',{create:true});
+    const fileName=`${imageFileStem(component.name)}-${Date.now()}.${imageFileExtension(file)}`;
+    const handle=await folder.getFileHandle(fileName,{create:true}),writer=await handle.createWritable();
+    await writer.write(file);await writer.close();
+    const imagePath=`assets/components/${fileName}`;component.image=imagePath;
+    if(component.sourceId){const definition=parts.find(item=>item.id===component.sourceId);if(definition)definition.image=imagePath}
+    markDirty();toast(`Imagem salva em ${imagePath}`);
+  }catch(error){
+    if(error?.name==='AbortError'){component.image=await fileToDataUrl(file);if(component.sourceId){const definition=parts.find(item=>item.id===component.sourceId);if(definition)definition.image=component.image}markDirty();toast('Pasta não selecionada: imagem mantida neste navegador.');return}
+    component.image=await fileToDataUrl(file);if(component.sourceId){const definition=parts.find(item=>item.id===component.sourceId);if(definition)definition.image=component.image}markDirty();toast('Não foi possível gravar no projeto; imagem mantida neste navegador.');console.warn(error);
+  }
+}
 const projectArchiveKey='painel-studio-projects-v1';
 let savedProjects=[];
 try { savedProjects=JSON.parse(localStorage.getItem(projectArchiveKey)||'[]'); if(!Array.isArray(savedProjects))savedProjects=[]; } catch { savedProjects=[]; }
@@ -26,11 +75,7 @@ markDirty = function markDirtyAndAutosave() {
   }
 };
 // Canaletas têm uma seção fixa e apenas o comprimento é variável.
-const channelProfiles = [30, 50, 80].map((size, i) => ({
-  id: `canaleta-${size}`, name: `Canaleta ${size} mm`, cat: 'Canaletas',
-  w: 200, h: size, fixedSection: size, channelProfile: true, resizable: true,
-  color: '#9ba8b8', icon: '▥'
-}));
+const channelProfiles = window.PANEL_STUDIO_CHANNEL_PROFILES || [];
 const oldChannels = parts.filter(p => p.channelProfile);
 const oldChannel = parts.find(p => p.id === 'canaleta');
 parts = parts.filter(p => p.id !== 'canaleta' && !p.channelProfile);
@@ -66,8 +111,12 @@ document.addEventListener('keydown', e => {
   }
   if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='s'){e.preventDefault();e.stopImmediatePropagation();saveProject();return;}
   if(typing)return;
-  if(e.key.toLowerCase()!=='r')return;
-  const p=placed.find(item=>item.id===selected);if(p&&!canRotateWithoutOverlap(p)){e.preventDefault();e.stopImmediatePropagation();toast('Rotação não permitida: causaria sobreposição.');}
+  if(e.key.toLowerCase()!=='r'||e.ctrlKey||e.metaKey||e.altKey||e.repeat)return;
+  const p=placed.find(item=>item.id===selected);
+  if(!p||p.type==='rail')return;
+  e.preventDefault();e.stopImmediatePropagation();
+  if(!canRotateWithoutOverlap(p)){toast('Rotação não permitida: causaria sobreposição.');return;}
+  rotate();
 }, true);
 $('#properties').addEventListener('click',e=>{
   if(!e.target.closest('#propRotate'))return;const p=placed.find(item=>item.id===selected);
@@ -153,13 +202,17 @@ function renderLibrary() {
   }).join('');
   document.querySelectorAll('#library .item').forEach(el => {
     el.onclick = () => {
+      const activeRail=placed.find(item=>item.id===selected&&item.type==='rail');
+      if(activeRail)libraryTargetRailId=activeRail.id;
+      else if(selectedLibraryId!==el.dataset.id)libraryTargetRailId=null;
       selectedLibraryId = el.dataset.id;
       selected = null;
       document.querySelectorAll('#library .item').forEach(item => item.classList.toggle('selected', item === el));
       render();
     };
-    el.ondblclick = e => { e.preventDefault(); placePart(el.dataset.id); };
-    el.ondragstart = e => { e.dataTransfer.setData('part', el.dataset.id); e.dataTransfer.setData('text/plain', el.dataset.id); e.dataTransfer.effectAllowed = 'copy'; };
+    el.ondblclick = e => { e.preventDefault(); addPartToSelectedRail(el.dataset.id); };
+    el.ondragstart = e => { libraryDragId=el.dataset.id; e.dataTransfer.setData('part', el.dataset.id); e.dataTransfer.setData('text/plain', el.dataset.id); e.dataTransfer.effectAllowed = 'copy'; e.dataTransfer.setDragImage(transparentDragImage,0,0); };
+    el.ondragend = () => { libraryDragId=null; clearLibraryDragPreview(); };
   });
 }
 
@@ -215,6 +268,25 @@ function canTranslateAttached(attachments,dx,dy) {
     });
   });
 }
+function nearestFreePosition(part,desiredX,desiredY,fallbackX=part.x,fallbackY=part.y){
+  const {w,h}=panel(),size=partSize(part),originalIndex=placed.indexOf(part);
+  if(originalIndex>=0)placed.splice(originalIndex,1);
+  const maxX=Math.max(0,w-size.w),maxY=Math.max(0,h-size.h);
+  const baseX=Math.max(0,Math.min(maxX,Math.round(desiredX/5)*5)),baseY=Math.max(0,Math.min(maxY,Math.round(desiredY/5)*5));
+  const maxRing=Math.ceil(Math.max(maxX,maxY)/5),seen=new Set();let found=null;
+  for(let ring=0;ring<=maxRing&&!found;ring++){
+    for(let dx=-ring;dx<=ring&&!found;dx++)for(let dy=-ring;dy<=ring;dy++){
+      if(Math.max(Math.abs(dx),Math.abs(dy))!==ring)continue;
+      const x=baseX+dx*5,y=baseY+dy*5;if(x<0||y<0||x>maxX||y>maxY)continue;
+      const snappedY=snapToRail(part,x,y),key=`${x}:${snappedY}`;if(seen.has(key))continue;seen.add(key);
+      if(canOccupy(part,x,snappedY)){found={x,y:snappedY};break}
+    }
+  }
+  if(found){part.x=found.x;part.y=found.y}
+  else if(originalIndex>=0){part.x=fallbackX;part.y=fallbackY;placed.splice(originalIndex,0,part)}
+  if(found&&originalIndex>=0)placed.splice(originalIndex,0,part);
+  return found;
+}
 function findFreePosition(part,x,y) {
   const {w,h}=panel(),size=partSize(part),startX=Math.max(0,Math.min(w-size.w,x)),startY=Math.max(0,Math.min(h-size.h,y));
   const snapped=snapToRail(part,startX,startY);
@@ -239,7 +311,7 @@ function pasteCopiedComponent(){
 }
 window.placePart=function placePartWithoutOverlap(id,x,y){
   const def=parts.find(item=>item.id===id);if(!def)return;
-  const obj={...def,id:'p'+Date.now()+Math.random().toString(16).slice(2,5),x:0,y:0,rot:false};
+  const obj={...def,id:'p'+Date.now()+Math.random().toString(16).slice(2,5),sourceId:def.id,x:0,y:0,rot:false};
   const spot=findFreePosition(obj,x??35,y??80);
   if(!spot){toast('Não há espaço livre para adicionar este componente.');return}
   Object.assign(obj,spot);placed.push(obj);selected=obj.id;selectedLibraryId=null;markDirty();render();
@@ -267,7 +339,7 @@ function renderProps() {
       ${categorySelect(lib.cat)}
       ${lib.channelProfile ? `<div class="item-sub" style="margin-top:10px">Seção fixa: ${lib.fixedSection} mm</div><div class="field-label">Comprimento</div><div class="field"><input id="libW" type="number" min="10" value="${lib.w}"><span class="unit">mm</span></div>` : `<div class="field-row"><div class="field"><div class="field-label">Largura</div><input id="libW" type="number" min="1" value="${lib.w}"><span class="unit">mm</span></div><div class="field"><div class="field-label">Altura</div><input id="libH" type="number" min="1" value="${lib.h}"><span class="unit">mm</span></div></div>`}
       ${lib.image ? `<img src="${lib.image}" style="width:100%;max-height:140px;object-fit:contain;margin:12px 0;border:1px solid #e6eaf0;border-radius:8px">` : ''}
-      <div class="field-label">Imagem do componente</div><input id="partImage" type="file" accept="image/*" class="select">
+      <div class="field-label">Imagem do componente</div><input id="partImage" type="file" accept="image/*" class="select"><div class="item-sub" style="margin-top:5px">Na primeira vez, autorize a pasta raiz do projeto; clique novamente para escolher a imagem. O arquivo será salvo em assets/components.</div>
       <div class="field-label">Ajuste da imagem</div><select id="imageFit" class="select"><option value="cover" ${(lib.imageFit||'cover')==='cover'?'selected':''}>Preencher área (cortar bordas)</option><option value="contain" ${lib.imageFit==='contain'?'selected':''}>Mostrar imagem inteira</option></select>
       ${lib.image ? '<div class="mini-actions"><button class="btn" id="removeImage">Remover imagem</button></div>' : ''}
       <div class="item-sub" style="margin-top:8px">Arraste este item para adicioná-lo ao painel.</div></div>`;
@@ -276,7 +348,8 @@ function renderProps() {
     $('#imageFit').onchange=e=>{lib.imageFit=e.target.value;markDirty();renderLibrary();renderProps()};
     $('#libW').onchange=e=>{lib.w=Math.max(10,+e.target.value||10);markDirty();renderLibrary();renderProps()};
     if ($('#libH')) $('#libH').onchange=e=>{lib.h=Math.max(1,+e.target.value||1);markDirty();renderLibrary();renderProps()};
-    $('#partImage').onchange = e => { const file=e.target.files?.[0]; if(!file)return; const reader=new FileReader(); reader.onload=()=>{lib.image=reader.result;markDirty();renderLibrary();renderProps()}; reader.readAsDataURL(file); };
+    prepareImageUploadPicker($('#partImage'));
+    $('#partImage').onchange=e=>{const file=e.target.files?.[0];if(!file)return;saveComponentImage(file,lib).then(()=>{renderLibrary();renderProps()});};
     if ($('#removeImage')) $('#removeImage').onclick=()=>{delete lib.image;markDirty();renderLibrary();renderProps()};
     return;
   }
@@ -298,11 +371,14 @@ function renderProps() {
     ${categorySelect(p.cat)}
     <div class="field-row"><div class="field"><div class="field-label">Posição X</div><input id="posX" type="number" value="${Math.round(p.x)}"></div><div class="field"><div class="field-label">Posição Y</div><input id="posY" type="number" value="${Math.round(p.y)}"></div></div>
     ${p.channelProfile ? `<div class="field-label">Comprimento</div><div class="field"><input id="partW" type="number" min="10" value="${p.w}"><span class="unit">mm</span></div><div class="item-sub" style="margin-top:6px">Seção fixa: ${p.fixedSection} mm. Arraste a alça na extremidade para ajustar o comprimento.</div>` : `<div class="field-row"><div class="field"><div class="field-label">Largura</div><input id="partW" type="number" min="1" value="${p.w}"><span class="unit">mm</span></div><div class="field"><div class="field-label">Altura</div><input id="partH" type="number" min="1" value="${p.h}"><span class="unit">mm</span></div></div>${p.resizable ? '<div class="item-sub" style="margin-top:6px">Use os campos ou arraste a alça azul para redimensionar.</div>' : ''}`}
+    <div class="field-label">Imagem do componente</div><input id="partImage" type="file" accept="image/*" class="select"><div class="item-sub" style="margin-top:5px">O arquivo selecionado será salvo em assets/components e associado ao componente.</div>
     ${p.image ? `<div class="field-label">Ajuste da imagem</div><select id="imageFit" class="select"><option value="cover" ${(p.imageFit||'cover')==='cover'?'selected':''}>Preencher área (cortar bordas)</option><option value="contain" ${p.imageFit==='contain'?'selected':''}>Mostrar imagem inteira</option></select>` : ''}
     <div class="mini-actions"><button class="btn" id="propRotate">⟳ Girar 90°</button><button class="btn" id="propDelete">⌫ Excluir</button></div></div>`;
   $('#posX').onchange=e=>{const x=+e.target.value;if(canOccupy(p,x,p.y)){p.x=x;markDirty()}else toast('Posição não permitida: sobreposição.');render()}; $('#posY').onchange=e=>{const y=+e.target.value;if(canOccupy(p,p.x,y)){p.y=y;markDirty()}else toast('Posição não permitida: sobreposição.');render()};
   $('#componentName').onchange=e=>{p.name=e.target.value.trim()||p.name;markDirty();render()};
   $('#componentCategory').onchange=e=>{p.cat=e.target.value;markDirty();render()};
+  prepareImageUploadPicker($('#partImage'));
+  $('#partImage').onchange=e=>{const file=e.target.files?.[0];if(!file)return;saveComponentImage(file,p).then(()=>render())};
   $('#partW').onchange=e=>{const w=Math.max(p.channelProfile?10:1,+e.target.value||1),h=p.channelProfile?p.fixedSection:p.h;if(canOccupy(p,p.x,p.y,w,h)){p.w=w;p.h=h;markDirty()}else toast('Dimensão não permitida: sobreposição.');render()};
   if ($('#partH')) $('#partH').onchange=e=>{const h=Math.max(1,+e.target.value||1);if(canOccupy(p,p.x,p.y,p.w,h)){p.h=h;markDirty()}else toast('Dimensão não permitida: sobreposição.');render()};
   if ($('#imageFit')) $('#imageFit').onchange=e=>{p.imageFit=e.target.value;markDirty();render()};
@@ -404,16 +480,73 @@ svg.addEventListener('pointermove',e=>{
     if(d.mode==='move'&&d.attached?.length){const tx=nx-d.x,ty=ny-d.y;if(canTranslateAttached(d.attached,tx,ty)){p.x=nx;p.y=ny;d.attached.forEach(item=>{item.part.x=item.x+tx;item.part.y=item.y+ty})}}
     else {p.x=nx;p.y=ny}
   }
-  else {const size=partSize(p),nx=Math.max(0,Math.min(w-size.w,Math.round((d.x+dx)/5)*5)),ny=Math.max(0,Math.min(h-size.h,Math.round((d.y+dy)/5)*5)),snappedY=snapToRail(p,nx,ny);if(canOccupy(p,nx,snappedY)){p.x=nx;p.y=snappedY}}
+  else {const size=partSize(p),nx=Math.max(0,Math.min(w-size.w,Math.round((d.x+dx)/5)*5)),ny=Math.max(0,Math.min(h-size.h,Math.round((d.y+dy)/5)*5));p.x=nx;p.y=snapToRail(p,nx,ny)}
   markDirty();render();
 },true);
-svg.addEventListener('pointerup',()=>{customDrag=null},true);
+svg.addEventListener('pointerup',e=>{
+  const d=customDrag;if(!d)return;customDrag=null;
+  if(d.p.type!=='rail'&&d.mode==='move'){
+    const result=nearestFreePosition(d.p,d.p.x,d.p.y,d.x,d.y);
+    if(!result)toast('Não há posição livre para soltar o componente.');
+    markDirty();render();
+  }
+},true);
 
 const oldRailButton=$('#railBtn'),railButton=oldRailButton.cloneNode(true);oldRailButton.replaceWith(railButton);
 railButton.addEventListener('click',()=>{const {w,h}=panel(),n=placed.filter(p=>p.type==='rail').length,len=Math.max(70,w-70),r={id:'r'+Date.now(),type:'rail',name:'Trilho DIN 35 mm',x:35,y:Math.round(h*(.28+.25*n)),w:len,length:len};placed.push(r);selected=r.id;selectedLibraryId=null;markDirty();render();toast('Trilho adicionado. Arraste para mover ou use as alças para ajustar o comprimento.')});
-$('#stage').addEventListener('drop',e=>{const id=e.dataTransfer.getData('part')||e.dataTransfer.getData('text/plain');if(!id)return;e.preventDefault();e.stopImmediatePropagation();const rect=svg.getBoundingClientRect(),{w,h}=panel();placePart(id,(e.clientX-rect.left)/rect.width*w,(e.clientY-rect.top)/rect.height*h)},true);
+function addPartToSelectedRail(id,x,y){
+  const rail=placed.find(item=>item.id===selected&&item.type==='rail')||placed.find(item=>item.id===libraryTargetRailId&&item.type==='rail');
+  libraryTargetRailId=null;
+  if(!rail){placePart(id,x,y);return}
+  const def=parts.find(item=>item.id===id);if(!def)return;
+  const railX=rail.x??35,railLength=rail.length??rail.w??0;
+  if(def.w>railLength){selected=rail.id;render();toast('O componente é maior que o comprimento do trilho.');return}
+  const part={...def,id:'p'+Date.now()+Math.random().toString(16).slice(2,5),x:0,y:rail.y-def.h/2,rot:false};
+  const minX=railX,maxX=railX+railLength-def.w,preferredX=(minX+maxX)/2;
+  const candidates=new Set([preferredX,minX,maxX]);
+  for(const other of placed){
+    if(other.type==='rail')continue;
+    const size=partSize(other);
+    candidates.add(other.x-def.w);candidates.add(other.x+size.w);
+  }
+  const freeX=[...candidates].filter(px=>px>=minX&&px<=maxX).sort((a,b)=>Math.abs(a-preferredX)-Math.abs(b-preferredX)).find(px=>canOccupy(part,px,part.y));
+  if(freeX===undefined){selected=rail.id;render();toast('Não há espaço livre suficiente neste trilho.');return}
+  part.x=freeX;
+  placed.push(part);
+  selected=rail.id;selectedLibraryId=null;libraryTargetRailId=rail.id;
+  markDirty();render();
+}
+function addPartAtPointer(id,x,y){
+  const def=parts.find(item=>item.id===id);if(!def)return;
+  const part={...def,id:'p'+Date.now()+Math.random().toString(16).slice(2,5),x:0,y:0,rot:false};
+  const size=partSize(part),{w,h}=panel();
+  const px=Math.max(0,Math.min(w-size.w,x-size.w/2)),py=Math.max(0,Math.min(h-size.h,y-size.h/2));
+  const snappedY=snapToRail(part,px,py);
+  if(!canOccupy(part,px,snappedY)){toast('Não foi possível adicionar: a posição está ocupada.');return}
+  part.x=px;part.y=snappedY;placed.push(part);selected=part.id;selectedLibraryId=null;libraryTargetRailId=null;markDirty();render();
+}
+let libraryDragPreview=null;
+function clearLibraryDragPreview(){libraryDragPreview?.remove();libraryDragPreview=null}
+function updateLibraryDragPreview(event){
+  const id=libraryDragId||event.dataTransfer?.getData('part')||event.dataTransfer?.getData('text/plain');
+  const def=parts.find(item=>item.id===id);if(!def)return;
+  event.preventDefault();const rect=svg.getBoundingClientRect(),{w,h}=panel(),x=(event.clientX-rect.left)/rect.width*w,y=(event.clientY-rect.top)/rect.height*h;
+  if(!libraryDragPreview){libraryDragPreview=document.createElementNS('http://www.w3.org/2000/svg','g');libraryDragPreview.setAttribute('pointer-events','none');libraryDragPreview.setAttribute('opacity','.72');svg.append(libraryDragPreview)}
+  libraryDragPreview.replaceChildren();const pw=def.w,ph=def.h;libraryDragPreview.setAttribute('transform',`translate(${x-pw/2},${y-ph/2})`);
+  const rectNode=document.createElementNS('http://www.w3.org/2000/svg','rect');rectNode.setAttribute('width',pw);rectNode.setAttribute('height',ph);rectNode.setAttribute('rx',2);rectNode.setAttribute('fill',def.color||'#6b8cff');rectNode.setAttribute('stroke','#4263eb');rectNode.setAttribute('stroke-dasharray','4 3');libraryDragPreview.append(rectNode);
+  if(def.image){const image=document.createElementNS('http://www.w3.org/2000/svg','image');image.setAttribute('width',pw);image.setAttribute('height',ph);image.setAttribute('href',def.image);image.setAttribute('preserveAspectRatio','xMidYMid meet');libraryDragPreview.append(image)}
+  else {const label=document.createElementNS('http://www.w3.org/2000/svg','text');label.setAttribute('x',pw/2);label.setAttribute('y',ph/2);label.setAttribute('text-anchor','middle');label.setAttribute('dominant-baseline','middle');label.setAttribute('font-size',Math.min(22,pw*.55));label.textContent=def.icon||'▦';libraryDragPreview.append(label)}
+}
+$('#stage').addEventListener('dragover',updateLibraryDragPreview,true);
+$('#stage').addEventListener('dragleave',e=>{if(!e.relatedTarget||!e.currentTarget.contains(e.relatedTarget))clearLibraryDragPreview()},true);
+$('#stage').addEventListener('drop',e=>{const id=e.dataTransfer.getData('part')||e.dataTransfer.getData('text/plain')||libraryDragId;if(!id)return;e.preventDefault();e.stopImmediatePropagation();clearLibraryDragPreview();libraryDragId=null;const rect=svg.getBoundingClientRect(),{w,h}=panel();addPartAtPointer(id,(e.clientX-rect.left)/rect.width*w,(e.clientY-rect.top)/rect.height*h)},true);
 $('#createPart').onclick=()=>{const name=$('#mName').value.trim()||'Novo componente',cat=$('#mCat').value,p={id:'lib'+Date.now(),name,cat,w:+$('#mW').value||30,h:+$('#mH').value||50,color:['#ed956e','#5aa8d8','#a482d6','#55b89a'][parts.length%4],icon:'▦',resizable:name.toLowerCase().includes('canaleta')};parts.push(p);$('#modalBack').style.display='none';$('#mName').value='';selectedLibraryId=p.id;selected=null;markDirty();renderLibrary();renderProps()};
 const stage=$('#stage');
+svg.addEventListener('pointerdown',e=>{
+  if(e.button!==0)return;
+  if(e.target.closest('g[transform]')||e.target.closest('[data-rail-id]'))return;
+  if(selected!==null||selectedLibraryId!==null){selected=null;selectedLibraryId=null;libraryTargetRailId=null;document.querySelectorAll('#library .item').forEach(item=>item.classList.remove('selected'));render()}
+},true);
 let panX=0,panY=0,panPointer=null;
 function applyPan(){const boardWrap=stage.querySelector('.board-wrap');if(boardWrap)boardWrap.style.transform=`translate(${panX}px,${panY}px)`}
 stage.addEventListener('pointerdown',e=>{if(e.button!==1)return;e.preventDefault();e.stopImmediatePropagation();panPointer=e.pointerId;stage.setPointerCapture(e.pointerId);stage.classList.add('panning');stage.dataset.panX=e.clientX;stage.dataset.panY=e.clientY},true);
@@ -422,3 +555,5 @@ const stopPan=e=>{if(panPointer!==e.pointerId)return;panPointer=null;if(stage.ha
 stage.addEventListener('wheel',e=>{e.preventDefault();const oldRect=svg.getBoundingClientRect(),anchorX=(e.clientX-oldRect.left)/scale,anchorY=(e.clientY-oldRect.top)/scale;scale=Math.max(.25,Math.min(1.5,scale*Math.exp(-e.deltaY*.001)));$('#zoomLabel').textContent=Math.round(scale*100)+'%';render();const newRect=svg.getBoundingClientRect();panX+=e.clientX-(newRect.left+anchorX*scale);panY+=e.clientY-(newRect.top+anchorY*scale);applyPan()},{passive:false});
 $('#fitBtn').onclick=()=>{panX=0;panY=0;const {w,h}=panel();scale=Math.max(.25,Math.min((stage.clientWidth-100)/w,(stage.clientHeight-100)/h,1));$('#zoomLabel').textContent=Math.round(scale*100)+'%';render();applyPan()};
 renderLibrary();render();
+
+
