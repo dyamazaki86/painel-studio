@@ -12,13 +12,36 @@ let selectionBox = null;
 let dragRenderFrame = 0;
 let copyBuffer = null;
 let showRulers = true;
-function historyState(){return {parts,placed,panelW:$('#panelW').value,panelH:$('#panelH').value,panelName:$('#panelName').value,panelColor,gridSpacing,showGrid}}
+function historyState(){return {placed,panelW:$('#panelW').value,panelH:$('#panelH').value,panelName:$('#panelName').value,panelColor,gridSpacing,showGrid}}
+function diffStates(prev,next){
+  const prevPlaced=new Map((prev.placed||[]).map(p=>[p.id,p]));
+  const nextPlaced=new Map((next.placed||[]).map(p=>[p.id,p]));
+  const placedChanges={};
+  for(const [id,prevPart] of prevPlaced){
+    const nextPart=nextPlaced.get(id);
+    if(!nextPart||JSON.stringify(prevPart)!==JSON.stringify(nextPart)){placedChanges[id]=JSON.parse(JSON.stringify(prevPart||{}))}
+  }
+  for(const [id,nextPart] of nextPlaced){
+    if(!prevPlaced.has(id)){placedChanges[id]=null}
+  }
+  const panelChanged=prev.panelW!==next.panelW||prev.panelH!==next.panelH||prev.panelName!==next.panelName||prev.panelColor!==next.panelColor||prev.gridSpacing!==next.gridSpacing||prev.showGrid!==next.showGrid;
+  return {placedChanges,panel:panelChanged?{panelW:prev.panelW,panelH:prev.panelH,panelName:prev.panelName,panelColor:prev.panelColor,gridSpacing:prev.gridSpacing,showGrid:prev.showGrid}:null}
+}
 let undoStack=[],lastHistoryState=JSON.parse(JSON.stringify(historyState())),historyActionOpen=false,historyActionRecorded=false,historySuppressed=false;
 function finishUndoAction(){historyActionOpen=false;historyActionRecorded=false;lastHistoryState=JSON.parse(JSON.stringify(historyState()))}
 function undoLastAction(){
-  const previous=undoStack.pop();if(!previous)return;
-  parts=JSON.parse(JSON.stringify(previous.parts||parts));placed=JSON.parse(JSON.stringify(previous.placed||[]));
-  $('#panelW').value=previous.panelW||600;$('#panelH').value=previous.panelH||800;$('#panelName').value=previous.panelName||'QD-01';panelColor=previous.panelColor||'';gridSpacing=previous.gridSpacing||10;$('#gridSpacing').value=gridSpacing;showGrid=previous.showGrid??showGrid;$('#gridToggle').classList.toggle('on',showGrid);
+  const diff=undoStack.pop();if(!diff)return;
+  if(diff.placedChanges){
+    const placedMap=new Map(placed.map(p=>[p.id,p]));
+    for(const [id,prevPart] of Object.entries(diff.placedChanges)){
+      if(prevPart===null){placedMap.delete(id)}
+      else{placedMap.set(id,JSON.parse(JSON.stringify(prevPart)))}
+    }
+    placed=[...placedMap.values()];
+  }
+  if(diff.panel){
+    $('#panelW').value=diff.panel.panelW??600;$('#panelH').value=diff.panel.panelH??800;$('#panelName').value=diff.panel.panelName??'QD-01';panelColor=diff.panel.panelColor||'';gridSpacing=diff.panel.gridSpacing??10;$('#gridSpacing').value=gridSpacing;showGrid=diff.panel.showGrid??showGrid;$('#gridToggle').classList.toggle('on',showGrid);
+  }
   syncPanelColorPalette();
   selectedIds=new Set([...selectedIds].filter(id=>placed.some(part=>part.id===id)));selected=selectedIds.has(selected)?selected:[...selectedIds].at(-1)||null;selectedLibraryId=null;
   historySuppressed=true;markDirty();historySuppressed=false;finishUndoAction();renderLibrary();render();toast('Última ação desfeita.');
@@ -27,11 +50,13 @@ function escapeText(value) { return String(value).replace(/[&<>"']/g, c => ({'&'
 const assetHandleDbName='painel-studio-file-handles';
 let cachedProjectDirectory=null;
 let uploadFolderReady=false;
+window.uploadFolderReady = uploadFolderReady;
 function openAssetHandleDb(){return new Promise((resolve,reject)=>{const request=indexedDB.open(assetHandleDbName,1);request.onupgradeneeded=()=>request.result.createObjectStore('handles');request.onsuccess=()=>resolve(request.result);request.onerror=()=>reject(request.error)})}
 async function readProjectDirectoryHandle(){if(cachedProjectDirectory)return cachedProjectDirectory;try{const db=await openAssetHandleDb();cachedProjectDirectory=await new Promise((resolve,reject)=>{const request=db.transaction('handles','readonly').objectStore('handles').get('project');request.onsuccess=()=>resolve(request.result||null);request.onerror=()=>reject(request.error)});db.close()}catch{}return cachedProjectDirectory}
 async function storeProjectDirectoryHandle(handle){cachedProjectDirectory=handle;try{const db=await openAssetHandleDb();await new Promise((resolve,reject)=>{const tx=db.transaction('handles','readwrite');tx.objectStore('handles').put(handle,'project');tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error)});db.close()}catch(error){console.warn('A pasta do projeto não pôde ser lembrada pelo navegador.',error)}}
 async function chooseProjectDirectory(){if(!window.showDirectoryPicker)return null;const handle=await window.showDirectoryPicker({id:'painel-studio-project',mode:'readwrite'});await storeProjectDirectoryHandle(handle);uploadFolderReady=true;await migrateEmbeddedImages(handle);return handle}
 async function getProjectDirectory(){if(!window.showDirectoryPicker)return null;let handle=await readProjectDirectoryHandle();if(handle){let permission=await handle.queryPermission({mode:'readwrite'});if(permission!=='granted')permission=await handle.requestPermission({mode:'readwrite'});if(permission==='granted')return handle;handle=null}return chooseProjectDirectory()}
+window.getProjectDirectory = getProjectDirectory;
 function prepareImageUploadPicker(input){input.addEventListener('click',event=>{if(!window.showDirectoryPicker||uploadFolderReady)return;event.preventDefault();getProjectDirectory().then(handle=>{if(handle){uploadFolderReady=true;toast('Pasta do projeto autorizada. Clique novamente para escolher a imagem.')}else toast('Não foi possível acessar a pasta do projeto. Tente novamente.')}).catch(error=>{if(error?.name!=='AbortError')console.warn('Não foi possível autorizar a pasta do projeto.',error);toast(error?.name==='AbortError'?'Seleção da pasta cancelada. Clique novamente para tentar.':'Não foi possível acessar a pasta do projeto.')})})}
 void readProjectDirectoryHandle();
 function fileToDataUrl(file){return new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(reader.result);reader.onerror=()=>reject(reader.error);reader.readAsDataURL(file)})}
@@ -69,6 +94,7 @@ async function saveComponentImage(file,component){
     component.image=await fileToDataUrl(file);if(component.sourceId){const definition=parts.find(item=>item.id===component.sourceId);if(definition)definition.image=component.image}markDirty();toast('Não foi possível gravar no projeto; imagem mantida neste navegador.');console.warn(error);
   }
 }
+window.saveComponentImage = saveComponentImage;
 const projectArchiveKey='painel-studio-projects-v1';
 let savedProjects=[];
 try { savedProjects=JSON.parse(localStorage.getItem(projectArchiveKey)||'[]'); if(!Array.isArray(savedProjects))savedProjects=[]; } catch { savedProjects=[]; }
@@ -92,8 +118,16 @@ markDirty = function markDirtyAndAutosave() {
 };
 const markDirtyWithAutosave=markDirty;
 markDirty=function markDirtyWithUndo(){
-  const next=JSON.stringify(historyState()),previous=JSON.stringify(lastHistoryState);
-  if(!historySuppressed&&next!==previous){if(!historyActionOpen||!historyActionRecorded){undoStack.push(JSON.parse(previous));if(undoStack.length>100)undoStack.shift();historyActionRecorded=true}lastHistoryState=JSON.parse(next)}
+  const nextState=historyState();const next=JSON.stringify(nextState);
+  const previous=JSON.stringify(lastHistoryState);
+  if(!historySuppressed&&next!==previous){
+    if(!historyActionOpen||!historyActionRecorded){
+      const diff=diffStates(lastHistoryState,nextState);
+      if(Object.keys(diff.placedChanges).length>0||diff.panel){undoStack.push(diff);if(undoStack.length>20)undoStack.shift()}
+      historyActionRecorded=true;
+    }
+    lastHistoryState=JSON.parse(next);
+  }
   markDirtyWithAutosave();
 };
 // Canaletas têm uma seção fixa e apenas o comprimento é variável.
@@ -334,12 +368,12 @@ function nearestFreePosition(part,desiredX,desiredY,fallbackX=part.x,fallbackY=p
   const {w,h}=panel(),size=partSize(part),originalIndex=placed.indexOf(part);
   if(originalIndex>=0)placed.splice(originalIndex,1);
   const minX=-workspaceMargin,minY=-workspaceMargin,maxX=w+workspaceMargin-size.w,maxY=h+workspaceMargin-size.h;
-  const baseX=Math.max(minX,Math.min(maxX,Math.round(desiredX/5)*5)),baseY=Math.max(minY,Math.min(maxY,Math.round(desiredY/5)*5));
-  const maxRing=Math.ceil(Math.max(maxX-minX,maxY-minY)/5),seen=new Set();let found=null;
+  const baseX=Math.max(minX,Math.min(maxX,Math.round(desiredX/1)*1)),baseY=Math.max(minY,Math.min(maxY,Math.round(desiredY/1)*1));
+  const maxRing=Math.ceil(Math.max(maxX-minX,maxY-minY)/1),seen=new Set();let found=null;
   for(let ring=0;ring<=maxRing&&!found;ring++){
     for(let dx=-ring;dx<=ring&&!found;dx++)for(let dy=-ring;dy<=ring;dy++){
       if(Math.max(Math.abs(dx),Math.abs(dy))!==ring)continue;
-      const x=baseX+dx*5,y=baseY+dy*5;if(x<minX||y<minY||x>maxX||y>maxY)continue;
+      const x=baseX+dx*1,y=baseY+dy*1;if(x<minX||y<minY||x>maxX||y>maxY)continue;
       const snappedY=snapToRail(part,x,y),key=`${x}:${snappedY}`;if(seen.has(key))continue;seen.add(key);
       if(canOccupy(part,x,snappedY)){found={x,y:snappedY};break}
     }
@@ -353,12 +387,13 @@ function findFreePosition(part,x,y) {
   const {w,h}=panel(),size=partSize(part),minX=-workspaceMargin,minY=-workspaceMargin,maxX=w+workspaceMargin-size.w,maxY=h+workspaceMargin-size.h,startX=Math.max(minX,Math.min(maxX,x)),startY=Math.max(minY,Math.min(maxY,y));
   const snapped=snapToRail(part,startX,startY);
   if(canOccupy(part,startX,snapped))return {x:startX,y:snapped};
-  for(let radius=10;radius<=Math.max(w,h);radius+=10)for(let dy=-radius;dy<=radius;dy+=10)for(let dx=-radius;dx<=radius;dx+=10){
+  // Busca em espiral com passos de 1mm para itens pequenos como bornes
+  for(let radius=1;radius<=Math.max(w,h);radius+=1)for(let dy=-radius;dy<=radius;dy+=1)for(let dx=-radius;dx<=radius;dx+=1){
     if(Math.max(Math.abs(dx),Math.abs(dy))!==radius)continue;
     const xx=Math.max(minX,Math.min(maxX,startX+dx)),yy=Math.max(minY,Math.min(maxY,startY+dy)),sy=snapToRail(part,xx,yy);
     if(canOccupy(part,xx,sy))return {x:xx,y:sy};
   }
-  for(let yy=minY;yy<=maxY;yy+=10)for(let xx=minX;xx<=maxX;xx+=10){const sy=snapToRail(part,xx,yy);if(canOccupy(part,xx,sy))return {x:xx,y:sy}}
+  for(let yy=minY;yy<=maxY;yy+=1)for(let xx=minX;xx<=maxX;xx+=1){const sy=snapToRail(part,xx,yy);if(canOccupy(part,xx,sy))return {x:xx,y:sy}}
   return null;
 }
 function pasteCopiedComponent(){
@@ -726,7 +761,7 @@ function applyPan(){const boardWrap=stage.querySelector('.board-wrap');if(boardW
 stage.addEventListener('pointerdown',e=>{if(e.button!==1)return;e.preventDefault();e.stopImmediatePropagation();panPointer=e.pointerId;stage.setPointerCapture(e.pointerId);stage.classList.add('panning');stage.dataset.panX=e.clientX;stage.dataset.panY=e.clientY},true);
 stage.addEventListener('pointermove',e=>{if(panPointer!==e.pointerId)return;const dx=e.clientX-(+stage.dataset.panX),dy=e.clientY-(+stage.dataset.panY);panX+=dx;panY+=dy;stage.dataset.panX=e.clientX;stage.dataset.panY=e.clientY;applyPan()},true);
 const stopPan=e=>{if(panPointer!==e.pointerId)return;panPointer=null;if(stage.hasPointerCapture(e.pointerId))stage.releasePointerCapture(e.pointerId);stage.classList.remove('panning')};stage.addEventListener('pointerup',stopPan,true);stage.addEventListener('pointercancel',stopPan,true);
-stage.addEventListener('wheel',e=>{e.preventDefault();const oldRect=svg.getBoundingClientRect(),anchorX=(e.clientX-oldRect.left)/scale,anchorY=(e.clientY-oldRect.top)/scale;scale=Math.max(.25,Math.min(2,scale*Math.exp(-e.deltaY*.001)));$('#zoomLabel').textContent=Math.round(scale*100)+'%';render();const newRect=svg.getBoundingClientRect();panX+=e.clientX-(newRect.left+anchorX*scale);panY+=e.clientY-(newRect.top+anchorY*scale);applyPan()},{passive:false});
+stage.addEventListener('wheel',e=>{e.preventDefault();const oldRect=svg.getBoundingClientRect(),anchorX=(e.clientX-oldRect.left)/scale,anchorY=(e.clientY-oldRect.top)/scale;scale=Math.max(.25,Math.min(2.5,scale*Math.exp(-e.deltaY*.001)));$('#zoomLabel').textContent=Math.round(scale*100)+'%';render();const newRect=svg.getBoundingClientRect();panX+=e.clientX-(newRect.left+anchorX*scale);panY+=e.clientY-(newRect.top+anchorY*scale);applyPan()},{passive:false});
 $('#fitBtn').onclick=()=>{panX=0;panY=0;const {w,h}=panel();scale=Math.max(.25,Math.min((stage.clientWidth-100)/w,(stage.clientHeight-100)/h,1));$('#zoomLabel').textContent=Math.round(scale*100)+'%';render();applyPan()};
 renderLibrary();render();
 
