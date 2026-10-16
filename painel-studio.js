@@ -46,6 +46,7 @@ function undoLastAction(){
   selectedIds=new Set([...selectedIds].filter(id=>placed.some(part=>part.id===id)));selected=selectedIds.has(selected)?selected:[...selectedIds].at(-1)||null;selectedLibraryId=null;
   historySuppressed=true;markDirty();historySuppressed=false;finishUndoAction();renderLibrary();render();toast('Última ação desfeita.');
 }
+$('#orderBtn').onclick=undoLastAction;
 function escapeText(value) { return String(value).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 const assetHandleDbName='painel-studio-file-handles';
 let cachedProjectDirectory=null;
@@ -63,7 +64,7 @@ function fileToDataUrl(file){return new Promise((resolve,reject)=>{const reader=
 function imageFileExtension(file){const ext=(file.name.split('.').pop()||'').toLowerCase();if(['png','jpg','jpeg','webp','gif','svg','avif'].includes(ext))return ext;return ({'image/jpeg':'jpg','image/svg+xml':'svg','image/webp':'webp','image/gif':'gif','image/avif':'avif'}[file.type]||'png')}
 function imageFileStem(name){return String(name).normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'')||'componente'}
 async function migrateEmbeddedImages(root){
-  const groups=[{parts,placed},...savedProjects.filter(project=>project.data).map(project=>project.data)];
+  const groups=[snapshotProject(),...savedProjects.filter(project=>project.data).map(project=>project.data)];
   const references=new Map();let sequence=0;
   for(const group of groups)for(const component of [...(group.parts||[]),...(group.placed||[])]){
     const source=component.image;if(typeof source!=='string'||!source.startsWith('data:image/'))continue;
@@ -106,7 +107,7 @@ const markDirtyBase = markDirty;
 markDirty = function markDirtyAndAutosave() {
   markDirtyBase();
   try {
-    const data = { parts, placed, panelW: $('#panelW').value, panelH: $('#panelH').value, panelName: $('#panelName').value, panelColor, gridSpacing };
+    const data = snapshotProject();
     const active=savedProjects.find(project=>project.id===activeProjectId);
     if(active){active.data=data;active.updatedAt=new Date().toISOString();localStorage.setItem(projectArchiveKey,JSON.stringify(savedProjects));localStorage.setItem('painel-studio-v1',JSON.stringify({projectId:active.id}));}
     else localStorage.setItem('painel-studio-v1', JSON.stringify(data));
@@ -146,11 +147,33 @@ placed.forEach(p => {
   const size = p.fixedSection || [30, 50, 80].sort((a,b) => Math.abs(a-(p.h||40))-Math.abs(b-(p.h||40)))[0];
   p.channelProfile = true; p.fixedSection = size; p.h = size; p.resizable = true; p.rot = !!p.rot;
 });
+const defaultLidParts=[
+  {id:'lid-button-green',name:'Botão verde Ø22 mm',cat:'Botões',w:22,h:22,color:'#32a878',icon:'',shape:'circle'},
+  {id:'lid-button-red',name:'Botão vermelho Ø22 mm',cat:'Botões',w:22,h:22,color:'#dc5963',icon:'',shape:'circle'},
+  {id:'lid-emergency-stop',name:'Botão de emergência Ø40 mm',cat:'Botões',w:40,h:40,color:'#e44848',icon:'',shape:'circle'},
+  {id:'lid-selector',name:'Chave seletora Ø22 mm',cat:'Botões',w:22,h:22,color:'#43546d',icon:'↔',shape:'circle'},
+  {id:'lid-pilot-green',name:'Sinalizador verde Ø22 mm',cat:'Sinalizadores',w:22,h:22,color:'#39ae79',icon:'',shape:'circle'},
+  {id:'lid-pilot-red',name:'Sinalizador vermelho Ø22 mm',cat:'Sinalizadores',w:22,h:22,color:'#db5360',icon:'',shape:'circle'},
+  {id:'lid-pilot-yellow',name:'Sinalizador amarelo Ø22 mm',cat:'Sinalizadores',w:22,h:22,color:'#e8b73b',icon:'',shape:'circle'},
+  {id:'lid-id-plate',name:'Placa de identificação 60 × 20 mm',cat:'Identificação',w:60,h:20,color:'#e7ebf1',icon:'ID'}
+];
+function mergeLidParts(saved=[]){const list=Array.isArray(saved)?saved:[],byId=new Map(list.map(part=>[part.id,part])),known=new Set(defaultLidParts.map(part=>part.id));return [...defaultLidParts.map(part=>({...part,...(byId.get(part.id)||{})})),...list.filter(part=>!known.has(part.id))]}
+let editorView='back',backplaneParts=parts,backplanePlaced=placed;
+const initialLidState=window.PANEL_STUDIO_INITIAL_LID||{};
+let lidParts=mergeLidParts(initialLidState.parts),lidPlaced=JSON.parse(JSON.stringify(initialLidState.placed||[]));
+function rememberEditorView(){if(editorView==='lid'){lidParts=parts;lidPlaced=placed}else{backplaneParts=parts;backplanePlaced=placed}}
+function restoreEditorView(view){editorView=view==='lid'?'lid':'back';parts=editorView==='lid'?lidParts:backplaneParts;placed=editorView==='lid'?lidPlaced:backplanePlaced}
+function syncViewChrome(){const lid=editorView==='lid',backButton=$('#viewBack'),lidButton=$('#viewLid');if(backButton){backButton.classList.toggle('is-active',!lid);backButton.setAttribute('aria-pressed',String(!lid))}if(lidButton){lidButton.classList.toggle('is-active',lid);lidButton.setAttribute('aria-pressed',String(lid))}const title=$('#libraryTitle');if(title)title.textContent=lid?'Biblioteca da tampa':'Biblioteca';$('#railBtn').hidden=lid;const {w,h}=panel();$('#boardLabel').textContent=`${lid?'Tampa':'Fundo'} · ${$('#panelName').value||'Painel'} · ${w} × ${h} mm`}
+function switchEditorView(view){const target=view||(editorView==='back'?'lid':'back');if(target===editorView)return;rememberEditorView();restoreEditorView(target);selected=null;selectedIds.clear();selectedLibraryId=null;undoStack=[];finishUndoAction();syncViewChrome();renderLibrary();render();$('#fitBtn').click()}
+$('#viewBack').addEventListener('click',()=>switchEditorView('back'));
+$('#viewLid').addEventListener('click',()=>switchEditorView('lid'));
+if(initialLidState.view==='lid')restoreEditorView('lid');
 undoStack=[];lastHistoryState=JSON.parse(JSON.stringify(historyState()));
 
 const renderBase = window.render;
 window.render = function renderOverride() {
   renderBase();
+  syncViewChrome();
   if(placed.some(item=>item.id===selected&&item.type==='rail'))selectedIds.clear();
   decorateRails();
   decorateImages();
@@ -172,7 +195,7 @@ document.addEventListener('keydown', e => {
   if((e.ctrlKey||e.metaKey)&&!typing&&e.key.toLowerCase()==='v'){
     if(!copyBuffer)return;e.preventDefault();e.stopImmediatePropagation();pasteCopiedComponent();return;
   }
-  if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='s'){e.preventDefault();e.stopImmediatePropagation();saveProject();return;}
+  if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='s'){e.preventDefault();e.stopImmediatePropagation();requestSaveProject();return;}
   if(typing)return;
   if(e.key.toLowerCase()==='t'&&!e.ctrlKey&&!e.metaKey&&!e.altKey&&!e.repeat){
     const ids=selectedIds.size?selectedIds:new Set(selected?[selected]:[]),targets=placed.filter(part=>ids.has(part.id));
@@ -196,20 +219,29 @@ const projectModal=document.createElement('div');
 projectModal.className='modal-back';projectModal.id='projectArchiveModal';
 projectModal.innerHTML='<div class="modal" style="width:min(560px,calc(100vw - 32px));max-height:80vh;overflow:auto"><div style="display:flex;align-items:center;gap:10px"><h3 style="margin:0">Projetos salvos</h3><div class="grow"></div><button class="btn icon" id="closeProjectArchive" title="Fechar">×</button></div><div id="projectArchiveList" style="margin-top:14px"></div></div>';
 document.body.append(projectModal);
-function snapshotProject(){return {parts,placed,panelW:$('#panelW').value,panelH:$('#panelH').value,panelName:$('#panelName').value,panelColor,gridSpacing}}
+const saveProjectModal=document.createElement('div');
+saveProjectModal.className='modal-back';saveProjectModal.id='saveProjectModal';
+saveProjectModal.innerHTML='<div class="modal" role="dialog" aria-modal="true" aria-labelledby="saveProjectTitle"><h3 id="saveProjectTitle">Confirmar nome do projeto</h3><label class="field-label" for="saveProjectName">Nome do projeto</label><input class="select" id="saveProjectName" maxlength="100" autocomplete="off"><div class="modal-actions"><button class="btn" id="cancelSaveProject">Cancelar</button><button class="btn primary" id="confirmSaveProject">Salvar projeto</button></div></div>';
+document.body.append(saveProjectModal);
+function snapshotProject(){rememberEditorView();return {parts:backplaneParts,placed:backplanePlaced,lidParts,lidPlaced,activeView:editorView,panelW:$('#panelW').value,panelH:$('#panelH').value,panelName:$('#panelName').value,panelColor,gridSpacing}}
 function renderProjectArchive(){
   savedProjects=savedProjects.filter(project=>project&&project.id&&project.data);
   projectListButton.textContent=savedProjects.length?`▤ Projetos (${savedProjects.length})`:'▤ Projetos';
   const list=$('#projectArchiveList');
   if(!savedProjects.length){list.innerHTML='<div class="empty">Nenhum projeto arquivado ainda. Use <b>Salvar</b> para arquivar o projeto atual.</div>';return}
-  list.innerHTML=[...savedProjects].sort((a,b)=>String(b.updatedAt||'').localeCompare(String(a.updatedAt||''))).map(project=>`<div style="display:flex;align-items:center;gap:10px;padding:12px 0;border-bottom:1px solid #eff1f4"><div style="min-width:0;flex:1"><div style="font-weight:700;font-size:13px;overflow-wrap:anywhere">${escapeText(project.name||'Projeto sem nome')}</div><div class="item-sub">Painel ${escapeText(project.data?.panelW||'—')} × ${escapeText(project.data?.panelH||'—')} mm · Atualizado ${project.updatedAt?new Date(project.updatedAt).toLocaleString('pt-BR'):'—'}</div></div><button class="btn primary" data-open-project="${escapeText(project.id)}">Abrir</button><button class="btn" data-delete-project="${escapeText(project.id)}" title="Excluir projeto">⌫</button></div>`).join('');
+  list.innerHTML=[...savedProjects].sort((a,b)=>String(b.updatedAt||'').localeCompare(String(a.updatedAt||''))).map(project=>`<div style="display:flex;align-items:center;gap:10px;padding:12px 0;border-bottom:1px solid #eff1f4"><div style="min-width:0;flex:1"><div style="font-weight:700;font-size:13px;overflow-wrap:anywhere">${escapeText(project.name||'Projeto sem nome')}</div><div class="item-sub">Painel ${escapeText(project.data?.panelW||'—')} × ${escapeText(project.data?.panelH||'—')} mm · Atualizado ${project.updatedAt?new Date(project.updatedAt).toLocaleString('pt-BR'):'—'}</div></div><button class="btn primary" data-open-project="${escapeText(project.id)}">Abrir</button><button class="btn" data-delete-project="${escapeText(project.id)}" title="Excluir projeto" aria-label="Excluir projeto"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6M10 11v5M14 11v5"/></svg></button></div>`).join('');
   list.querySelectorAll('[data-open-project]').forEach(button=>button.onclick=()=>loadSavedProject(button.dataset.openProject));
   list.querySelectorAll('[data-delete-project]').forEach(button=>button.onclick=()=>deleteSavedProject(button.dataset.deleteProject));
 }
 function openProjectArchive(){renderProjectArchive();projectModal.style.display='flex'}
-function saveProject(){
+function requestSaveProject(){
+  const input=$('#saveProjectName');
+  input.value=$('#projectName').textContent.trim()||`Projeto ${$('#panelName').value||'sem nome'}`;
+  saveProjectModal.style.display='flex';input.focus();input.select();
+}
+function saveProject(confirmedName){
   let project=savedProjects.find(item=>item.id===activeProjectId);
-  const name=$('#projectName').textContent.trim()||`Projeto ${$('#panelName').value||'sem nome'}`;
+  const name=(typeof confirmedName==='string'?confirmedName:$('#projectName').textContent).trim()||`Projeto ${$('#panelName').value||'sem nome'}`;
   if(!project){
     project={id:`project-${Date.now()}-${Math.random().toString(16).slice(2,6)}`,name,updatedAt:new Date().toISOString(),data:null};savedProjects.push(project);activeProjectId=project.id;localStorage.setItem('painel-studio-active-project',activeProjectId);
   }
@@ -219,15 +251,24 @@ function saveProject(){
   dirty=false;$('#saveState').textContent='Salvo';$('#projectName').textContent=project.name;renderProjectArchive();toast('Projeto arquivado neste navegador');
 }
 function loadSavedProject(id){
-  const project=savedProjects.find(item=>item.id===id);if(!project?.data)return;
-  if(!activeProjectId&&dirty&&placed.length&&!confirm('Abrir outro projeto? O rascunho atual não está arquivado.'))return;
-  parts=mergeSavedParts(project.data.parts||parts);placed=JSON.parse(JSON.stringify(project.data.placed||[])).map(part=>part.sourceId==='weg-cwb38'&&part.image==='assets/components/weg-cwb38-frontal.jpg'?{...part,image:'assets/components/weg-cwb38-frontal.png'}:part);selectedIds.clear();
+  const project=savedProjects.find(item=>item.id===id);if(!project?.data)return false;
+  if(activeProjectId===id)return true;
+  if(dirty&&!confirm('O projeto atual tem alterações não salvas. Abrir outro projeto mesmo assim?'))return false;
+  backplaneParts=mergeSavedParts(project.data.parts||backplaneParts);backplanePlaced=JSON.parse(JSON.stringify(project.data.placed||[])).map(part=>part.sourceId==='weg-cwb38'&&part.image==='assets/components/weg-cwb38-frontal.jpg'?{...part,image:'assets/components/weg-cwb38-frontal.png'}:part);lidParts=mergeLidParts(project.data.lidParts);lidPlaced=JSON.parse(JSON.stringify(project.data.lidPlaced||[]));restoreEditorView(project.data.activeView||'back');selectedIds.clear();
   $('#panelW').value=project.data.panelW||600;$('#panelH').value=project.data.panelH||800;$('#panelName').value=project.data.panelName||'QD-01';panelColor=project.data.panelColor||'';syncPanelColorPalette();gridSpacing=Math.max(5,Math.min(500,Math.round(+project.data.gridSpacing||10)));$('#gridSpacing').value=gridSpacing;
   undoStack=[];finishUndoAction();
   activeProjectId=project.id;localStorage.setItem('painel-studio-active-project',activeProjectId);localStorage.setItem('painel-studio-v1',JSON.stringify({projectId:project.id}));
   selected=null;selectedIds.clear();selectedLibraryId=null;dirty=false;$('#saveState').textContent='Salvo';$('#projectName').textContent=project.name;
-  projectModal.style.display='none';renderLibrary();render();$('#fitBtn').click();toast('Projeto aberto');
+  projectModal.style.display='none';syncViewChrome();renderLibrary();render();$('#fitBtn').click();toast('Projeto aberto');return true;
 }
+window.PANEL_STUDIO_OPEN_ADMIN_PROJECT=function(project){
+  if(!project?.id||!project?.data)return false;
+  const cached={id:project.id,name:project.name,data:project.data,updatedAt:project.updatedAt||project.updated_at};
+  const index=savedProjects.findIndex(item=>item.id===cached.id);
+  if(index<0)savedProjects.push(cached);else savedProjects[index]=cached;
+  localStorage.setItem(projectArchiveKey,JSON.stringify(savedProjects));
+  return loadSavedProject(cached.id);
+};
 function deleteSavedProject(id){
   const project=savedProjects.find(item=>item.id===id);if(!project||!confirm(`Excluir o projeto “${project.name}” arquivado?`))return;
   if(activeProjectId===id){localStorage.setItem('painel-studio-v1',JSON.stringify(snapshotProject()));activeProjectId=null;localStorage.removeItem('painel-studio-active-project');$('#projectName').textContent='Rascunho';}
@@ -236,19 +277,83 @@ function deleteSavedProject(id){
 }
 projectListButton.onclick=openProjectArchive;$('#closeProjectArchive').onclick=()=>projectModal.style.display='none';
 projectModal.addEventListener('click',e=>{if(e.target===projectModal)projectModal.style.display='none'});
-$('#saveBtn').onclick=saveProject;
+$('#saveBtn').onclick=requestSaveProject;
+$('#confirmSaveProject').onclick=()=>{const name=$('#saveProjectName').value.trim();if(!name){$('#saveProjectName').focus();return}saveProjectModal.style.display='none';saveProject(name)};
+$('#cancelSaveProject').onclick=()=>saveProjectModal.style.display='none';
+$('#saveProjectName').addEventListener('keydown',e=>{if(e.key==='Enter'){$('#confirmSaveProject').click();e.preventDefault()}if(e.key==='Escape')saveProjectModal.style.display='none'});
+saveProjectModal.addEventListener('click',e=>{if(e.target===saveProjectModal)saveProjectModal.style.display='none'});
 const projectTitle=$('#projectName');
 projectTitle.setAttribute('contenteditable','true');projectTitle.setAttribute('role','textbox');projectTitle.setAttribute('aria-label','Nome do projeto');
 projectTitle.onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();projectTitle.blur()}if(e.key==='Escape'){const active=savedProjects.find(item=>item.id===activeProjectId);projectTitle.textContent=active?.name||localStorage.getItem('painel-studio-draft-name')||'Novo projeto';projectTitle.blur()}};
 projectTitle.onblur=()=>{const name=projectTitle.textContent.trim()||'Novo projeto';projectTitle.textContent=name;const active=savedProjects.find(item=>item.id===activeProjectId);if(active){active.name=name;active.updatedAt=new Date().toISOString();try{localStorage.setItem(projectArchiveKey,JSON.stringify(savedProjects));renderProjectArchive();$('#saveState').textContent='Nome atualizado'}catch(error){console.warn('Não foi possível salvar o nome do projeto.',error)}}else{localStorage.setItem('painel-studio-draft-name',name)}};
 $('#newBtn').onclick=()=>{
-  if(placed.length&&!confirm('Criar um novo projeto? O projeto salvo continua disponível na lista; o rascunho atual não será arquivado.'))return;
-  activeProjectId=null;localStorage.removeItem('painel-studio-active-project');placed=[];selected=null;selectedIds.clear();selectedLibraryId=null;
+  const hasUnarchivedDraft=!activeProjectId&&(placed.length>0||$('#projectName').textContent.trim()!=='Novo projeto');
+  if((dirty||hasUnarchivedDraft)&&!confirm('O estado atual ainda não foi salvo pelo botão Salvar. Criar um novo projeto mesmo assim?'))return;
+  rememberEditorView();activeProjectId=null;localStorage.removeItem('painel-studio-active-project');backplanePlaced=[];lidParts=mergeLidParts();lidPlaced=[];restoreEditorView('back');selected=null;selectedIds.clear();selectedLibraryId=null;
   $('#panelW').value=600;$('#panelH').value=800;$('#panelName').value='QD-01';panelColor='';syncPanelColorPalette();selectedIds.clear();gridSpacing=10;$('#gridSpacing').value=10;$('#projectName').textContent='Novo projeto';localStorage.setItem('painel-studio-draft-name','Novo projeto');
-  undoStack=[];finishUndoAction();dirty=false;render();markDirty();finishUndoAction();
+  undoStack=[];finishUndoAction();dirty=false;syncViewChrome();renderLibrary();render();markDirty();finishUndoAction();
 };
 if(activeProjectId){const active=savedProjects.find(project=>project.id===activeProjectId);if(active)$('#projectName').textContent=active.name}else $('#projectName').textContent=localStorage.getItem('painel-studio-draft-name')||'Novo projeto';
 renderProjectArchive();
+
+// Cloud account synchronization: the project data stays in the profile-scoped cache
+// first, then is queued to Supabase so an interrupted connection cannot lose edits.
+const markDirtyWithCloudSync = markDirty;
+markDirty = function markDirtyAndQueueCloudSync() {
+  markDirtyWithCloudSync();
+  const active = savedProjects.find(project => project.id === activeProjectId);
+  if (!active?.data || !window.PANEL_STUDIO_QUEUE_PROJECT_SYNC) return;
+  $('#saveState').textContent = 'Sincronizando…';
+  window.PANEL_STUDIO_QUEUE_PROJECT_SYNC(active);
+};
+
+const saveProjectLocal = saveProject;
+saveProject = function saveProjectAndSyncCloud(confirmedName) {
+  saveProjectLocal(confirmedName);
+  const project = savedProjects.find(item => item.id === activeProjectId);
+  if (!project || !window.PANEL_STUDIO_SYNC_PROJECT) return;
+  $('#saveState').textContent = 'Sincronizando…';
+  window.PANEL_STUDIO_SYNC_PROJECT(project).then(() => {
+    $('#saveState').textContent = 'Sincronizado';
+    toast('Projeto sincronizado com sua conta');
+  }).catch(error => {
+    $('#saveState').textContent = 'Erro ao sincronizar';
+    toast('Salvo neste navegador, mas não foi possível sincronizar. Tente salvar novamente.');
+    console.warn('Falha ao sincronizar projeto com o Supabase.', error);
+  });
+};
+$('#saveBtn').onclick = requestSaveProject;
+window.PANEL_STUDIO_SAVE_PROJECT = saveProject;
+window.PANEL_STUDIO_IS_DIRTY = () => dirty;
+
+const deleteSavedProjectLocal = deleteSavedProject;
+deleteSavedProject = function deleteSavedProjectAndSync(id) {
+  deleteSavedProjectLocal(id);
+  if (savedProjects.some(project => project.id === id)) return;
+  window.PANEL_STUDIO_DELETE_PROJECT?.(id).catch(error => {
+    toast('Projeto removido desta lista, mas não do armazenamento online.');
+    console.warn('Falha ao remover projeto do Supabase.', error);
+  });
+};
+
+const projectTitleBlurLocal = projectTitle.onblur;
+projectTitle.onblur = function saveProjectTitleToCloud(event) {
+  projectTitleBlurLocal.call(this, event);
+  const active = savedProjects.find(project => project.id === activeProjectId);
+  if (active?.data) window.PANEL_STUDIO_QUEUE_PROJECT_SYNC?.(active);
+};
+
+const saveComponentImageLocal = window.saveComponentImage;
+window.saveComponentImage = async function saveProfileImage(file, component) {
+  if (!window.PANEL_STUDIO_USER) return saveComponentImageLocal(file, component);
+  component.image = await fileToDataUrl(file);
+  if (component.sourceId) {
+    const definition = parts.find(item => item.id === component.sourceId);
+    if (definition) definition.image = component.image;
+  }
+  markDirty();
+  toast('Imagem incluída no projeto da sua conta');
+};
 
 const libraryCollapseKey='painel-studio-collapsed-library-categories';
 let collapsedLibraryCategories=new Set();
@@ -269,7 +374,7 @@ function renderLibrary() {
     const collapsed=!query&&collapsedLibraryCategories.has(cat),key=escapeText(cat);
     return `<section class="library-group"><button type="button" class="library-category-toggle" data-library-category="${key}" aria-expanded="${!collapsed}"><span class="library-category-chevron">▼</span><span>${key}</span><span class="library-category-count">${items.length}</span></button><div class="library-category-items" ${collapsed?'hidden':''}>` + items.map(p =>
       `<div class="item ${p.id === selectedLibraryId ? 'selected' : ''}" draggable="true" data-id="${p.id}">
-        <div class="chip" style="background:${p.image?'transparent':p.color+'22'};color:${p.color}">${p.image ? `<img src="${p.image}" style="display:block;width:32px;height:34px;max-width:32px;max-height:34px;object-fit:contain;border-radius:5px;overflow:hidden">` : p.icon}</div>
+        <div class="chip${p.shape==='circle'?' chip-round':''}" style="background:${p.image?'transparent':p.color+'22'};color:${p.color}">${p.image ? `<img src="${p.image}" style="display:block;width:32px;height:34px;max-width:32px;max-height:34px;object-fit:contain;border-radius:5px;overflow:hidden">` : p.icon}</div>
         <div><div class="item-title">${escapeText(p.name)}</div><div class="item-sub">${p.channelProfile ? `Seção fixa ${p.fixedSection} mm · comp. ${p.w} mm` : `${p.w} × ${p.h} mm`}</div></div>
         <span class="item-add" title="Arraste para adicionar">⠿</span></div>`).join('')+'</div></section>';
   }).join('');
@@ -469,7 +574,7 @@ function renderProps() {
       <div class="field-row"><div class="field"><div class="field-label">Posição X</div><input id="railX" type="number" value="${Math.round(p.x??35)}"><span class="unit">mm</span></div>
       <div class="field"><div class="field-label">Posição Y</div><input id="railY" type="number" value="${Math.round(p.y)}"><span class="unit">mm</span></div></div>
       <div class="mini-actions"><button class="btn" id="toggleLock">${p.locked?'🔓 Destravar trilho':'🔒 Travar trilho'}</button></div>
-      <div class="mini-actions"><button class="btn" id="propDelete">⌫ Excluir trilho</button></div></div>`;
+      <div class="mini-actions"><button class="btn" id="propDelete"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6M10 11v5M14 11v5"/></svg> Excluir trilho</button></div></div>`;
     $('#railLength').onchange=e=>{p.length=Math.max(70,+e.target.value||70);p.w=p.length;p.x=Math.min(p.x??35,w-p.length);markDirty();render()};
     $('#railX').onchange=e=>{p.x=Math.max(0,Math.min(w-(p.length??p.w),+e.target.value||0));markDirty();render()};
     $('#railY').onchange=e=>{p.y=Math.max(0,Math.min(h,+e.target.value||0));markDirty();render()};
@@ -482,7 +587,7 @@ function renderProps() {
     <div class="field-label">Imagem do componente</div><input id="partImage" type="file" accept="image/*" class="select"><div class="item-sub" style="margin-top:5px">O arquivo selecionado será salvo em assets/components e associado ao componente.</div>
     ${p.image ? `<div class="field-label">Ajuste da imagem</div><select id="imageFit" class="select"><option value="cover" ${(p.imageFit||'cover')==='cover'?'selected':''}>Preencher área (cortar bordas)</option><option value="contain" ${p.imageFit==='contain'?'selected':''}>Mostrar imagem inteira</option></select>` : ''}
     <div class="mini-actions"><button class="btn" id="toggleLock">${p.locked?'🔓 Destravar componente':'🔒 Travar componente'}</button></div>
-    <div class="mini-actions"><button class="btn" id="propRotate">⟳ Girar 90°</button><button class="btn" id="propDelete">⌫ Excluir</button></div></div>`;
+    <div class="mini-actions"><button class="btn" id="propRotate"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 7v5h-5"/><path d="M20 12a8 8 0 1 1-2.34-5.66L20 12"/></svg> Girar 90°</button><button class="btn" id="propDelete"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6M10 11v5M14 11v5"/></svg> Excluir</button></div></div>`;
   $('#posX').onchange=e=>{const x=+e.target.value;if(canOccupy(p,x,p.y)){p.x=x;markDirty()}else toast('Posição não permitida: sobreposição.');render()}; $('#posY').onchange=e=>{const y=+e.target.value;if(canOccupy(p,p.x,y)){p.y=y;markDirty()}else toast('Posição não permitida: sobreposição.');render()};
   $('#componentName').onchange=e=>{p.name=e.target.value.trim()||p.name;markDirty();render()};
   $('#componentCategory').onchange=e=>{p.cat=e.target.value;markDirty();render()};
@@ -737,7 +842,7 @@ function updateLibraryDragPreview(event){
   event.preventDefault();const rect=svg.getBoundingClientRect(),{w,h}=panel(),x=(event.clientX-rect.left)/rect.width*w,y=(event.clientY-rect.top)/rect.height*h;
   if(!libraryDragPreview){libraryDragPreview=document.createElementNS('http://www.w3.org/2000/svg','g');libraryDragPreview.setAttribute('pointer-events','none');libraryDragPreview.setAttribute('opacity','.72');svg.append(libraryDragPreview)}
   libraryDragPreview.replaceChildren();const pw=def.w,ph=def.h;libraryDragPreview.setAttribute('transform',`translate(${x-pw/2},${y-ph/2})`);
-  const rectNode=document.createElementNS('http://www.w3.org/2000/svg','rect');rectNode.setAttribute('width',pw);rectNode.setAttribute('height',ph);rectNode.setAttribute('rx',2);rectNode.setAttribute('fill',def.color||'#6b8cff');rectNode.setAttribute('stroke','#4263eb');rectNode.setAttribute('stroke-dasharray','4 3');libraryDragPreview.append(rectNode);
+  const shapeNode=document.createElementNS('http://www.w3.org/2000/svg',def.shape==='circle'?'circle':'rect');if(def.shape==='circle'){shapeNode.setAttribute('cx',pw/2);shapeNode.setAttribute('cy',ph/2);shapeNode.setAttribute('r',Math.min(pw,ph)/2-1)}else{shapeNode.setAttribute('width',pw);shapeNode.setAttribute('height',ph);shapeNode.setAttribute('rx',2)}shapeNode.setAttribute('fill',def.color||'#6b8cff');shapeNode.setAttribute('stroke','#4263eb');shapeNode.setAttribute('stroke-dasharray','4 3');libraryDragPreview.append(shapeNode);
   if(def.image){const image=document.createElementNS('http://www.w3.org/2000/svg','image');image.setAttribute('width',pw);image.setAttribute('height',ph);image.setAttribute('href',def.image);image.setAttribute('preserveAspectRatio','xMidYMid meet');libraryDragPreview.append(image)}
   else {const label=document.createElementNS('http://www.w3.org/2000/svg','text');label.setAttribute('x',pw/2);label.setAttribute('y',ph/2);label.setAttribute('text-anchor','middle');label.setAttribute('dominant-baseline','middle');label.setAttribute('font-size',Math.min(22,pw*.55));label.textContent=def.icon||'▦';libraryDragPreview.append(label)}
 }
