@@ -38,42 +38,54 @@ function editPart(p){let n=prompt('Nome do componente:',p.name);if(n!==null){p.n
 function persist(){let data={parts,placed,panelW:$('#panelW').value,panelH:$('#panelH').value,panelName:$('#panelName').value,panelColor,gridSpacing};localStorage.setItem('painel-studio-v1',JSON.stringify(data));dirty=false;$('#saveState').textContent='Salvo';toast('Projeto salvo neste navegador')}
 function mergeSavedParts(saved){const catalog=window.PANEL_STUDIO_COMPONENTS||[],savedList=Array.isArray(saved)?saved:[],byId=new Map(savedList.map(part=>[part.id,part])),known=new Set(catalog.map(part=>part.id));return [...catalog.map(part=>{const old=byId.get(part.id)||{},merged={...part,...old};if(part.id==='weg-cwb38'&&old.image==='assets/components/weg-cwb38-frontal.jpg')merged.image=part.image;return merged}),...savedList.filter(part=>!known.has(part.id))]}
 function restore(){let d;try{d=JSON.parse(localStorage.getItem('painel-studio-v1'));if(d?.projectId){let projects=JSON.parse(localStorage.getItem('painel-studio-projects-v1')||'[]');d=projects.find(p=>p.id===d.projectId)?.data||null}}catch{}if(d){window.PANEL_STUDIO_INITIAL_LID={parts:d.lidParts||[],placed:d.lidPlaced||[],view:d.activeView||'back'};parts=mergeSavedParts(d.parts);placed=(d.placed||[]).map(part=>part.sourceId==='weg-cwb38'&&part.image==='assets/components/weg-cwb38-frontal.jpg'?{...part,image:'assets/components/weg-cwb38-frontal.png'}:part);$('#panelW').value=d.panelW||600;$('#panelH').value=d.panelH||800;$('#panelName').value=d.panelName||'QD-01';panelColor=d.panelColor||'';gridSpacing=Math.max(5,Math.min(500,Math.round(+d.gridSpacing||10)));$('#gridSpacing').value=gridSpacing;}}function toast(msg){let t=$('#toast');t.textContent=msg;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),2100)}
-function exportPNG(){
-  const clone=svg.cloneNode(true);clone.querySelectorAll('.grid-lines,.rail-guide,.rail-handle,.selection-indicator,.channel-resize,.editor-anchor-halo,.editor-anchor-point,.editor-lock-badge').forEach(decoration=>decoration.remove());
+async function exportPNG(){
+  const clone=svg.cloneNode(true);
+  clone.querySelectorAll('.grid-lines,.rail-guide,.rail-handle,.selection-indicator,.channel-resize,.editor-anchor-halo,.editor-anchor-point,.editor-lock-badge').forEach(decoration=>decoration.remove());
   if(typeof editorView!=='undefined'&&editorView==='lid')clone.querySelector('.panel-inner-frame')?.remove();
   clone.querySelectorAll('.part.selected').forEach(part=>part.classList.remove('selected'));
   clone.querySelectorAll('g[data-rail-id] > rect:first-child').forEach(rail=>{rail.setAttribute('stroke','#8793a3');rail.setAttribute('stroke-width','1.5')});
-  const svgImages=[...clone.querySelectorAll('image')];
-  Promise.all(svgImages.map(async image=>{
-    const source=image.getAttribute('href')||image.getAttributeNS('http://www.w3.org/1999/xlink','href');
-    if(!source||/^(data:|blob:)/i.test(source))return;
-    const absoluteUrl=new URL(source,document.baseURI).href;
-    try{
-      const response=await fetch(absoluteUrl,{credentials:'same-origin'});if(!response.ok)throw new Error(`HTTP ${response.status}`);const imageBlob=await response.blob();
-      const dataUrl=await new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(reader.result);reader.onerror=()=>reject(reader.error);reader.readAsDataURL(imageBlob)});
-      image.setAttribute('href',dataUrl);
-    }catch(error){image.setAttribute('href',absoluteUrl);console.warn('A imagem de um componente não pôde ser incorporada diretamente; usando o endereço original.',error)}
-  })).then(()=>{
-  const blob=new Blob([new XMLSerializer().serializeToString(clone)],{type:'image/svg+xml;charset=utf-8'}),url=URL.createObjectURL(blob),img=new Image();
-  img.onerror=()=>{URL.revokeObjectURL(url);toast('Não foi possível preparar a imagem. Tente exportar novamente.')};
-  img.onload=()=>{
-    const scaleFactor=2,canvas=document.createElement('canvas');canvas.width=img.width*scaleFactor;canvas.height=img.height*scaleFactor;
-    const context=canvas.getContext('2d');if(!context){URL.revokeObjectURL(url);toast('Não foi possível preparar a imagem.');return}
-    context.fillStyle='#fff';context.fillRect(0,0,canvas.width,canvas.height);context.scale(scaleFactor,scaleFactor);context.drawImage(img,0,0);
-    const logicalWidth=img.width,logicalHeight=img.height;
-    const logo=new Image();logo.crossOrigin='anonymous';logo.onload=()=>{try{
-      const diagonal=Math.hypot(logicalWidth,logicalHeight),logoWidth=diagonal*.92,logoHeight=logoWidth*(logo.naturalHeight/logo.naturalWidth);
-      context.save();context.globalAlpha=.16;context.translate(logicalWidth/2,logicalHeight/2);context.rotate(-Math.atan2(logicalHeight,logicalWidth));context.drawImage(logo,-logoWidth/2,-logoHeight/2,logoWidth,logoHeight);context.restore();
-    }catch(error){console.warn('Não foi possível aplicar a marca d’água da Electro Automação.',error)}finishExport()};
-    logo.onerror=()=>{URL.revokeObjectURL(url);toast('Não foi possível carregar a logo da Electro Automação. O PNG não foi exportado.')};
-    function finishExport(){
-      URL.revokeObjectURL(url);
-      try{const link=document.createElement('a');link.download='painel-'+($('#panelName').value||'projeto')+'.png';link.href=canvas.toDataURL('image/png');link.click();setTimeout(()=>URL.revokeObjectURL(link.href),1000);toast('PNG exportado com marca d’água')}catch(error){toast('Não foi possível exportar o PNG com a logo. Verifique sua conexão e tente novamente.');console.warn('A imagem da marca não permitiu exportação no canvas.',error)}
-    }
-    logo.src=window.PANEL_STUDIO_WATERMARK_LOGO||new URL('assets/electro-logo.png',document.baseURI).href;
+
+  const viewBox=clone.viewBox.baseVal,logicalWidth=viewBox.width||Number(clone.getAttribute('width')),logicalHeight=viewBox.height||Number(clone.getAttribute('height'));
+  if(!logicalWidth||!logicalHeight){toast('Não foi possível exportar: dimensões do painel inválidas.');return}
+  // Export at a predictable 2 px/mm resolution, regardless of the editor zoom.
+  clone.setAttribute('width',logicalWidth);clone.setAttribute('height',logicalHeight);
+
+  const toDataUrl=blob=>new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(reader.result);reader.onerror=()=>reject(reader.error||new Error('Falha ao ler imagem.'));reader.readAsDataURL(blob)});
+  const fetchDataUrl=async(source,label)=>{
+    if(/^data:image\//i.test(source))return source;
+    const response=await fetch(new URL(source,document.baseURI),{credentials:'same-origin'});
+    if(!response.ok)throw new Error(`${label}: HTTP ${response.status}`);
+    const blob=await response.blob();if(!blob.type.startsWith('image/'))throw new Error(`${label}: formato de imagem inválido.`);
+    return toDataUrl(blob);
   };
-  img.src=url;
-  }).catch(error=>{console.error('Falha ao preparar as imagens dos componentes para exportação.',error);toast('Não foi possível preparar as imagens dos componentes para exportação.')});
+
+  try{
+    await Promise.all([...clone.querySelectorAll('image')].map(async image=>{
+      const source=image.getAttribute('href')||image.getAttributeNS('http://www.w3.org/1999/xlink','href');
+      if(!source)throw new Error('Um componente está sem endereço de imagem.');
+      image.setAttribute('href',await fetchDataUrl(source,'Imagem do componente'));
+      image.removeAttributeNS('http://www.w3.org/1999/xlink','href');
+    }));
+
+    const svgBlob=new Blob([new XMLSerializer().serializeToString(clone)],{type:'image/svg+xml;charset=utf-8'});
+    const svgUrl=URL.createObjectURL(svgBlob);
+    try{
+      const panelImage=await new Promise((resolve,reject)=>{const image=new Image();image.onload=()=>resolve(image);image.onerror=()=>reject(new Error('Não foi possível rasterizar o painel.'));image.src=svgUrl});
+      const scaleFactor=2,canvas=document.createElement('canvas');canvas.width=logicalWidth*scaleFactor;canvas.height=logicalHeight*scaleFactor;
+      const context=canvas.getContext('2d');if(!context)throw new Error('Canvas indisponível para exportação.');
+      context.fillStyle='#fff';context.fillRect(0,0,canvas.width,canvas.height);context.scale(scaleFactor,scaleFactor);context.drawImage(panelImage,0,0,logicalWidth,logicalHeight);
+
+      const logoSource=window.PANEL_STUDIO_WATERMARK_LOGO||new URL('assets/electro-logo.png',document.baseURI).href;
+      const logoDataUrl=await fetchDataUrl(logoSource,'Logo da Electro Automação');
+      const logo=await new Promise((resolve,reject)=>{const image=new Image();image.onload=()=>resolve(image);image.onerror=()=>reject(new Error('Não foi possível carregar a logo da Electro Automação.'));image.src=logoDataUrl});
+      const diagonal=Math.hypot(logicalWidth,logicalHeight),logoWidth=diagonal*1.08,logoHeight=logoWidth*(logo.naturalHeight/logo.naturalWidth);
+      context.save();context.globalAlpha=.24;context.translate(logicalWidth/2,logicalHeight/2);context.rotate(-Math.atan2(logicalHeight,logicalWidth));context.drawImage(logo,-logoWidth/2,-logoHeight/2,logoWidth,logoHeight);context.restore();
+
+      const pngBlob=await new Promise((resolve,reject)=>canvas.toBlob(blob=>blob?resolve(blob):reject(new Error('Não foi possível gerar o arquivo PNG.')),'image/png'));
+      const pngUrl=URL.createObjectURL(pngBlob),link=document.createElement('a');link.href=pngUrl;link.download=`painel-${($('#panelName').value||'projeto').trim().replace(/[\\/:*?"<>|]+/g,'-')}.png`;link.style.display='none';document.body.append(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(pngUrl),30000);
+      toast('PNG exportado com imagens e marca d’água Electro Automação');
+    }finally{URL.revokeObjectURL(svgUrl)}
+  }catch(error){console.error('Falha na exportação do PNG.',error);toast(`Falha ao exportar: ${error.message||'tente novamente.'}`)}
 }
 function fit(){let {w,h}=panel(),stage=$('#stage');scale=Math.min((stage.clientWidth-100)/w,(stage.clientHeight-100)/h,1);scale=Math.max(.25,scale);$('#zoomLabel').textContent=Math.round(scale*100)+'%';render()}
 $('#search').oninput=renderLibrary;$('#panelW').onchange=()=>{markDirty();render()};$('#panelH').onchange=()=>{markDirty();render()};$('#panelName').oninput=()=>{markDirty();render()};$('#gridToggle').onclick=e=>{showGrid=!showGrid;e.currentTarget.classList.toggle('on',showGrid);markDirty();render()};$('#gridSpacing').onchange=e=>{gridSpacing=Math.max(5,Math.min(500,Math.round(+e.target.value||20)));e.target.value=gridSpacing;markDirty();render()};$('#railBtn').addEventListener('click',()=>{let {w,h}=panel(),rails=placed.filter(p=>p.type==='rail').length,maxLen=Math.max(70,w-70),rail={id:'r'+Date.now(),type:'rail',name:'Trilho DIN 35 mm',cat:'Trilho',y:Math.round(h*(.28+.25*rails)),x:35,w:maxLen,length:maxLen};placed.push(rail);selected=rail.id;markDirty();render();toast('Trilho DIN adicionado — ajuste o comprimento nas Propriedades')});$('#rotateBtn').onclick=rotate;$('#duplicateBtn').onclick=()=>{let p=placed.find(p=>p.id===selected);if(p){let copy={...p,id:'p'+Date.now(),x:p.x+20,y:p.y+20};placed.push(copy);selected=copy.id;markDirty();render()}};$('#deleteBtn').onclick=removeSelected;$('#saveBtn').onclick=persist;$('#exportBtn').onclick=exportPNG;$('#fitBtn').onclick=fit;$('#zoomIn').onclick=()=>{scale=Math.min(2.5,scale*1.15);$('#zoomLabel').textContent=Math.round(scale*100)+'%';render()};$('#zoomOut').onclick=()=>{scale=Math.max(.25,scale/1.15);$('#zoomLabel').textContent=Math.round(scale*100)+'%';render()};$('#stage').addEventListener('dragover',e=>e.preventDefault());$('#stage').addEventListener('drop',e=>{e.preventDefault();let id=e.dataTransfer.getData('part');if(id){let r=svg.getBoundingClientRect();placePart(id,(e.clientX-r.left)/scale,(e.clientY-r.top)/scale)}});svg.addEventListener('pointerdown',e=>{if(e.target===svg){selected=null;render()}});svg.addEventListener('pointermove',movePart);svg.addEventListener('pointerup',endMove);document.addEventListener('keydown',e=>{if(e.key==='Delete'||e.key==='Backspace')removeSelected();if(e.key.toLowerCase()==='r')rotate();if((e.ctrlKey||e.metaKey)&&e.key==='s'){e.preventDefault();persist()}});
