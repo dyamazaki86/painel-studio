@@ -236,12 +236,14 @@ function renderProjectArchive(){
 }
 function openProjectArchive(){renderProjectArchive();projectModal.style.display='flex'}
 function requestSaveProject(){
+  if(window.PANEL_STUDIO_IS_VISITOR&& !activeProjectId && savedProjects.length>=1){toast('Visitantes podem salvar apenas um projeto. Exclua o projeto atual para salvar outro.');return}
   const input=$('#saveProjectName');
   input.value=$('#projectName').textContent.trim()||`Projeto ${$('#panelName').value||'sem nome'}`;
   saveProjectModal.style.display='flex';input.focus();input.select();
 }
 function saveProject(confirmedName){
   let project=savedProjects.find(item=>item.id===activeProjectId);
+  if(window.PANEL_STUDIO_IS_VISITOR&&!project&&savedProjects.length>=1){toast('Visitantes podem salvar apenas um projeto. Exclua o projeto atual para salvar outro.');return false}
   const name=(typeof confirmedName==='string'?confirmedName:$('#projectName').textContent).trim()||`Projeto ${$('#panelName').value||'sem nome'}`;
   if(!project){
     project={id:`project-${Date.now()}-${Math.random().toString(16).slice(2,6)}`,name,updatedAt:new Date().toISOString(),data:null};savedProjects.push(project);activeProjectId=project.id;localStorage.setItem('painel-studio-active-project',activeProjectId);
@@ -249,7 +251,7 @@ function saveProject(confirmedName){
   project.name=name;project.data=snapshotProject();project.updatedAt=new Date().toISOString();
   try{localStorage.setItem(projectArchiveKey,JSON.stringify(savedProjects));localStorage.setItem('painel-studio-v1',JSON.stringify({projectId:project.id}));}
   catch(error){toast('Não foi possível arquivar. O armazenamento do navegador pode estar cheio.');console.warn(error);return}
-  dirty=false;$('#saveState').textContent='Salvo';$('#projectName').textContent=project.name;renderProjectArchive();toast('Projeto arquivado neste navegador');
+  dirty=false;$('#saveState').textContent='Salvo';$('#projectName').textContent=project.name;renderProjectArchive();toast('Projeto arquivado neste navegador');return true;
 }
 function loadSavedProject(id){
   const project=savedProjects.find(item=>item.id===id);if(!project?.data)return false;
@@ -288,6 +290,7 @@ projectTitle.setAttribute('contenteditable','true');projectTitle.setAttribute('r
 projectTitle.onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();projectTitle.blur()}if(e.key==='Escape'){const active=savedProjects.find(item=>item.id===activeProjectId);projectTitle.textContent=active?.name||localStorage.getItem('painel-studio-draft-name')||'Novo projeto';projectTitle.blur()}};
 projectTitle.onblur=()=>{const name=projectTitle.textContent.trim()||'Novo projeto';projectTitle.textContent=name;const active=savedProjects.find(item=>item.id===activeProjectId);if(active){active.name=name;active.updatedAt=new Date().toISOString();try{localStorage.setItem(projectArchiveKey,JSON.stringify(savedProjects));renderProjectArchive();$('#saveState').textContent='Nome atualizado'}catch(error){console.warn('Não foi possível salvar o nome do projeto.',error)}}else{localStorage.setItem('painel-studio-draft-name',name)}};
 $('#newBtn').onclick=()=>{
+  if(window.PANEL_STUDIO_IS_VISITOR&&savedProjects.length>=1){toast('Visitantes podem salvar apenas um projeto. Exclua o projeto existente para criar outro.');return}
   const hasUnarchivedDraft=!activeProjectId&&(placed.length>0||$('#projectName').textContent.trim()!=='Novo projeto');
   if((dirty||hasUnarchivedDraft)&&!confirm('O estado atual ainda não foi salvo pelo botão Salvar. Criar um novo projeto mesmo assim?'))return;
   rememberEditorView();activeProjectId=null;localStorage.removeItem('painel-studio-active-project');backplanePlaced=[];lidParts=mergeLidParts();lidPlaced=[];restoreEditorView('back');selected=null;selectedIds.clear();selectedLibraryId=null;
@@ -326,6 +329,7 @@ function renderBillOfMaterials(){
   table.hidden=!currentMaterialRows.length;empty.hidden=!!currentMaterialRows.length;
 }
 function downloadBillOfMaterials(){
+  if(window.PANEL_STUDIO_IS_VISITOR)return;
   if(!currentMaterialRows.length){toast('Adicione componentes ao painel para gerar a lista.');return}
   const quote=value=>`"${String(value).replace(/"/g,'""')}"`,lines=[['Quantidade','Material','Categoria','Lado','Dimensões'].map(quote).join(';'),...currentMaterialRows.map(item=>[item.quantity,item.name,item.category,item.side,item.dimensions].map(quote).join(';'))],blob=new Blob(['\ufeff'+lines.join('\r\n')],{type:'text/csv;charset=utf-8'}),url=URL.createObjectURL(blob),link=document.createElement('a');
   link.href=url;link.download=`materiais-${($('#panelName').value||'painel').toLowerCase().replace(/[^a-z0-9-]+/g,'-')}.csv`;link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);toast('Lista de materiais exportada em CSV');
@@ -334,6 +338,7 @@ materialsButton.addEventListener('click',()=>{renderBillOfMaterials();materialsM
 materialsModal.querySelectorAll('[data-materials-close]').forEach(button=>button.addEventListener('click',()=>materialsModal.style.display='none'));
 materialsModal.addEventListener('click',event=>{if(event.target===materialsModal)materialsModal.style.display='none'});
 materialsModal.querySelector('#downloadMaterialsCsv').addEventListener('click',downloadBillOfMaterials);
+if(window.PANEL_STUDIO_IS_VISITOR){const exportButton=materialsModal.querySelector('#downloadMaterialsCsv');exportButton.classList.add('materials-export-unavailable');exportButton.title='Recurso não disponível para visitantes';exportButton.setAttribute('aria-disabled','true')}
 materialsModal.addEventListener('keydown',event=>{if(event.key==='Escape')materialsModal.style.display='none'});
 
 // Cloud account synchronization: the project data stays in the profile-scoped cache
@@ -349,7 +354,7 @@ markDirty = function markDirtyAndQueueCloudSync() {
 
 const saveProjectLocal = saveProject;
 saveProject = function saveProjectAndSyncCloud(confirmedName) {
-  saveProjectLocal(confirmedName);
+  if(saveProjectLocal(confirmedName)===false)return;
   const project = savedProjects.find(item => item.id === activeProjectId);
   if (!project || !window.PANEL_STUDIO_SYNC_PROJECT) return;
   $('#saveState').textContent = 'Sincronizando…';

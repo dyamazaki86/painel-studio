@@ -43,7 +43,11 @@ function initializePanelStudioAuth() {
     signUpTab.setAttribute('aria-selected', String(creating));
     $('.auth-tabs').hidden = recovery;
     $('#nameField').hidden = !creating;
+    $('#usernameField').hidden = !creating;
     $('#emailField').hidden = recovery;
+    $('#emailField').querySelector('label').textContent = creating ? 'E-mail' : 'E-mail ou nome de login';
+    $('#authEmail').type = creating || recovery ? 'email' : 'text';
+    $('#authEmail').placeholder = creating ? 'voce@empresa.com' : 'voce@empresa.com ou usuario';
     $('#authTitle').textContent = recovery ? 'Defina uma nova senha' : creating ? 'Crie seu perfil' : 'Boas-vindas de volta';
     $('#authSubtitle').textContent = recovery ? 'Escolha uma senha nova para sua conta.' : creating
       ? 'Seus projetos ficarão organizados na sua conta.'
@@ -163,7 +167,7 @@ function initializePanelStudioAuth() {
   function loadScript(src) {
     return new Promise((resolve, reject) => {
       const script = document.createElement('script');
-      script.src = `${src}?v=0.3.5`;
+      script.src = `${src}?v=0.3.6`;
       script.onload = resolve;
       script.onerror = () => reject(new Error(`Não foi possível carregar ${src}.`));
       document.body.append(script);
@@ -237,7 +241,7 @@ function initializePanelStudioAuth() {
         list.textContent = 'Carregando usuários…';
         try {
           const [profilesResult, projectsResult] = await Promise.all([
-            client.from('profiles').select('user_id,email,full_name,role').order('email', { ascending: true }),
+            client.from('profiles').select('user_id,email,username,full_name,role').order('email', { ascending: true }),
             client.from('projects').select('id,user_id')
           ]);
           if (profilesResult.error) throw profilesResult.error;
@@ -271,8 +275,8 @@ function initializePanelStudioAuth() {
             const role = document.createElement('select');
             role.className = 'select admin-user-role';
             role.setAttribute('aria-label', `Cargo de ${profile.email || profile.full_name || 'usuário'}`);
-            role.innerHTML = '<option value="user">user</option><option value="admin">admin</option>';
-            role.value = profile.role === 'admin' ? 'admin' : 'user';
+            role.innerHTML = '<option value="user">user</option><option value="visitor">visitor</option><option value="admin">admin</option>';
+            role.value = ['user', 'visitor', 'admin'].includes(profile.role) ? profile.role : 'user';
             if (profile.user_id === user.id) {
               const userOption = role.querySelector('option[value="user"]');
               userOption.disabled = true;
@@ -288,7 +292,7 @@ function initializePanelStudioAuth() {
                 if (roleError) throw roleError;
                 profile.role = role.value;
               } catch (error) {
-                role.value = profile.role === 'admin' ? 'admin' : 'user';
+                role.value = ['user', 'visitor', 'admin'].includes(profile.role) ? profile.role : 'user';
                 const status = usersBackdrop.querySelector('.admin-users-status');
                 status.textContent = `Não foi possível alterar o cargo: ${error.message}`;
                 status.hidden = false;
@@ -451,13 +455,14 @@ function initializePanelStudioAuth() {
     bootPromise = (async () => {
       const keys = makeStorageKeys(user.id);
       const { data: profile, error: profileError } = await client.from('profiles')
-        .select('role')
+        .select('role,username')
         .eq('user_id', user.id)
         .single();
       if (profileError) console.warn('Não foi possível carregar o cargo do perfil; a sessão ficará no nível user até a migração de cargos estar disponível.', profileError);
-      const role = !profileError && profile?.role === 'admin' ? 'admin' : 'user';
-      window.PANEL_STUDIO_USER = { id: user.id, email: user.email, displayName: user.user_metadata?.full_name || user.email, role };
+      const role = !profileError && ['admin', 'visitor'].includes(profile?.role) ? profile.role : 'user';
+      window.PANEL_STUDIO_USER = { id: user.id, email: user.email, username: profile?.username || user.user_metadata?.username || '', displayName: user.user_metadata?.full_name || user.email, role };
       window.PANEL_STUDIO_IS_ADMIN = role === 'admin';
+      window.PANEL_STUDIO_IS_VISITOR = role === 'visitor';
       window.PANEL_STUDIO_KEYS = keys;
       window.PANEL_STUDIO_LIBRARY_API = {
         isAdmin: role === 'admin',
@@ -561,6 +566,7 @@ function initializePanelStudioAuth() {
     $('#authEmail').disabled = true;
     $('#authPassword').disabled = true;
     $('#authName').disabled = true;
+    $('#authUsername').disabled = true;
     return;
   }
 
@@ -579,11 +585,14 @@ function initializePanelStudioAuth() {
   if (!isEditorPage) form.addEventListener('submit', async (event) => {
     event.preventDefault();
     clearMessage();
-    const email = $('#authEmail').value.trim();
+    const identifier = $('#authEmail').value.trim();
+    let email = identifier;
     const password = $('#authPassword').value;
     if (mode === 'reset' && password.length < 8) return showMessage('A senha precisa ter pelo menos 8 caracteres.');
-    if (mode !== 'reset' && (!email || !password)) return showMessage('Informe seu e-mail e sua senha.');
+    if (mode !== 'reset' && (!identifier || !password)) return showMessage('Informe seu e-mail ou nome de login e sua senha.');
     if (mode === 'signup' && password.length < 8) return showMessage('A senha precisa ter pelo menos 8 caracteres.');
+    const username = $('#authUsername')?.value.trim().toLowerCase() || '';
+    if (mode === 'signup' && !/^[a-z0-9][a-z0-9._-]{2,31}$/.test(username)) return showMessage('O nome de login deve ter de 3 a 32 caracteres, sem espaços. Use letras minúsculas, números, ponto, hífen ou sublinhado.');
     setBusy(true);
     try {
       if (mode === 'reset') {
@@ -593,7 +602,7 @@ function initializePanelStudioAuth() {
         await bootStudio(data.user);
       } else if (mode === 'signup') {
         const fullName = $('#authName').value.trim();
-        const options = { data: { full_name: fullName } };
+        const options = { data: { full_name: fullName, username } };
         if (window.location.protocol === 'https:' || window.location.protocol === 'http:') {
           options.emailRedirectTo = new URL('index.html', window.location.href).href;
         }
@@ -602,6 +611,12 @@ function initializePanelStudioAuth() {
         if (data.session && data.user) await bootStudio(data.user);
         else showMessage('Conta criada. Confira seu e-mail para confirmar o cadastro e depois entre.', 'success');
       } else {
+        if (!identifier.includes('@')) {
+          const { data: resolvedEmail, error: lookupError } = await client.rpc('resolve_login_email', { login_identifier: identifier.toLowerCase() });
+          if (lookupError) throw lookupError;
+          if (!resolvedEmail) return showMessage('Usuário ou senha inválidos.');
+          email = resolvedEmail;
+        }
         const { data, error } = await client.auth.signInWithPassword({ email, password });
         if (error) throw error;
         await bootStudio(data.user);
@@ -615,12 +630,19 @@ function initializePanelStudioAuth() {
 
   if (!isEditorPage) $('#forgotPassword').addEventListener('click', async () => {
     clearMessage();
-    const email = $('#authEmail').value.trim();
-    if (!email) return showMessage('Informe seu e-mail para receber o link de redefinição.');
+    const identifier = $('#authEmail').value.trim();
+    if (!identifier) return showMessage('Informe seu e-mail ou nome de login para receber o link de redefinição.');
     try {
       const redirectTo = (window.location.protocol === 'https:' || window.location.protocol === 'http:')
         ? new URL('index.html', window.location.href).href
         : undefined;
+      let email = identifier;
+      if (!identifier.includes('@')) {
+        const { data, error: lookupError } = await client.rpc('resolve_login_email', { login_identifier: identifier.toLowerCase() });
+        if (lookupError) throw lookupError;
+        if (!data) return showMessage('Se a conta estiver cadastrada, você receberá um link para redefinir a senha.', 'success');
+        email = data;
+      }
       const { error } = await client.auth.resetPasswordForEmail(email, redirectTo ? { redirectTo } : undefined);
       if (error) throw error;
       showMessage('Se o e-mail estiver cadastrado, você receberá um link para redefinir a senha.', 'success');

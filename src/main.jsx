@@ -78,8 +78,13 @@ function AuthView() {
               <TextField id="authName" fullWidth size="small" placeholder="Como podemos chamar você?" autoComplete="name" />
             </Box>
             <Box className="auth-field" id="emailField">
-              <Typography component="label" htmlFor="authEmail">E-mail</Typography>
-              <TextField id="authEmail" fullWidth size="small" type="email" placeholder="voce@empresa.com" autoComplete="email" required />
+              <Typography component="label" htmlFor="authEmail">E-mail ou nome de login</Typography>
+              <TextField id="authEmail" fullWidth size="small" type="text" placeholder="voce@empresa.com ou usuario" autoComplete="username" required />
+            </Box>
+            <Box className="auth-field" id="usernameField" hidden>
+              <Typography component="label" htmlFor="authUsername">Nome de login</Typography>
+              <TextField id="authUsername" fullWidth size="small" type="text" placeholder="ex.: danilo.silva" autoComplete="username" inputProps={{ minLength: 3, maxLength: 32, pattern: '[a-z0-9][a-z0-9._-]{2,31}', autoCapitalize: 'none', spellCheck: false }} />
+              <Typography component="span" className="auth-field-hint">Sem espaços; use letras minúsculas, números, ponto, hífen ou sublinhado.</Typography>
             </Box>
             <Box className="auth-field" id="passwordField">
               <Typography component="label" htmlFor="authPassword" id="passwordLabel">Senha</Typography>

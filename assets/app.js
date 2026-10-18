@@ -40,7 +40,7 @@ function editPart(p){let n=prompt('Nome do componente:',p.name);if(n!==null){p.n
 function persist(){let data={parts,placed,panelW:$('#panelW').value,panelH:$('#panelH').value,panelName:$('#panelName').value,panelColor,gridSpacing};localStorage.setItem('painel-studio-v1',JSON.stringify(data));dirty=false;$('#saveState').textContent='Salvo';toast('Projeto salvo neste navegador')}
 function mergeSavedParts(saved,catalog=(window.PANEL_STUDIO_LIBRARY_DATA?.components||window.PANEL_STUDIO_COMPONENTS||[]).filter(part=>(part.side||'back')==='back')){const savedList=Array.isArray(saved)?saved:[],known=new Set(catalog.map(part=>part.id));return [...catalog.map(part=>({...part})),...savedList.filter(part=>!known.has(part.id))]}
 function restore(){let d;try{d=JSON.parse(localStorage.getItem('painel-studio-v1'));if(d?.projectId){let projects=JSON.parse(localStorage.getItem('painel-studio-projects-v1')||'[]');d=projects.find(p=>p.id===d.projectId)?.data||null}}catch{}if(d){window.PANEL_STUDIO_INITIAL_LID={parts:d.lidParts||[],placed:d.lidPlaced||[],view:d.activeView||'back'};parts=mergeSavedParts(d.parts);placed=(d.placed||[]).map(part=>part.sourceId==='weg-cwb38'&&part.image==='assets/components/weg-cwb38-frontal.jpg'?{...part,image:'assets/components/weg-cwb38-frontal.png'}:part);$('#panelW').value=d.panelW||600;$('#panelH').value=d.panelH||800;$('#panelName').value=d.panelName||'QD-01';panelColor=d.panelColor||'';gridSpacing=Math.max(5,Math.min(500,Math.round(+d.gridSpacing||10)));$('#gridSpacing').value=gridSpacing;}}function toast(msg){let t=$('#toast');t.textContent=msg;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),2100)}
-async function exportPNG(){
+async function performPNGExport(){
   const clone=svg.cloneNode(true);
   clone.querySelectorAll('.grid-lines,.rail-guide,.rail-handle,.selection-indicator,.channel-resize,.editor-anchor-halo,.editor-anchor-point,.editor-lock-badge').forEach(decoration=>decoration.remove());
   if(typeof editorView!=='undefined'&&editorView==='lid')clone.querySelector('.panel-inner-frame')?.remove();
@@ -88,6 +88,27 @@ async function exportPNG(){
       toast('PNG exportado com imagens e marca d’água Electro Automação');
     }finally{URL.revokeObjectURL(svgUrl)}
   }catch(error){console.error('Falha na exportação do PNG.',error);toast(`Falha ao exportar: ${error.message||'tente novamente.'}`)}
+}
+let visitorPngExportPending=false;
+function waitForVisitorExport(){
+  let backdrop=document.getElementById('visitorExportDelay');
+  if(!backdrop){
+    backdrop=document.createElement('div');backdrop.id='visitorExportDelay';backdrop.className='visitor-export-backdrop';backdrop.hidden=true;
+    backdrop.innerHTML='<section class="visitor-export-dialog" role="alertdialog" aria-modal="true" aria-labelledby="visitorExportTitle" aria-describedby="visitorExportMessage"><span class="visitor-export-mark" aria-hidden="true">⏱</span><h2 id="visitorExportTitle">Exportação de demonstração</h2><p id="visitorExportMessage">Aguarde para exportar o PNG.</p><strong class="visitor-export-count" aria-live="polite">10</strong><span class="visitor-export-caption">segundos restantes</span></section>';
+    document.body.append(backdrop);
+  }
+  const count=backdrop.querySelector('.visitor-export-count');let remaining=10;count.textContent=remaining;backdrop.hidden=false;
+  return new Promise(resolve=>{const timer=window.setInterval(()=>{remaining-=1;count.textContent=remaining;if(remaining<=0){window.clearInterval(timer);backdrop.hidden=true;resolve()}},1000)});
+}
+async function exportPNG(){
+  const visitor=window.PANEL_STUDIO_IS_VISITOR||window.PANEL_STUDIO_USER?.role==='visitor';
+  if(visitor){
+    if(visitorPngExportPending)return;
+    visitorPngExportPending=true;const button=$('#exportBtn');button.disabled=true;button.setAttribute('aria-busy','true');
+    try{await waitForVisitorExport();await performPNGExport()}finally{visitorPngExportPending=false;button.disabled=false;button.removeAttribute('aria-busy')}
+    return;
+  }
+  await performPNGExport();
 }
 function fit(){let {w,h}=panel(),stage=$('#stage');scale=Math.min((stage.clientWidth-100)/w,(stage.clientHeight-100)/h,1);scale=Math.max(.25,scale);$('#zoomLabel').textContent=Math.round(scale*100)+'%';render()}
 $('#search').oninput=renderLibrary;$('#panelW').onchange=()=>{markDirty();render()};$('#panelH').onchange=()=>{markDirty();render()};$('#panelName').oninput=()=>{markDirty();render()};$('#gridToggle').onclick=e=>{showGrid=!showGrid;e.currentTarget.classList.toggle('on',showGrid);markDirty();render()};$('#gridSpacing').onchange=e=>{gridSpacing=Math.max(5,Math.min(500,Math.round(+e.target.value||20)));e.target.value=gridSpacing;markDirty();render()};$('#railBtn').addEventListener('click',()=>{let {w,h}=panel(),rails=placed.filter(p=>p.type==='rail').length,maxLen=Math.max(70,w-70),rail={id:'r'+Date.now(),type:'rail',name:'Trilho DIN 35 mm',cat:'Trilho',y:Math.round(h*(.28+.25*rails)),x:35,w:maxLen,length:maxLen};placed.push(rail);selected=rail.id;markDirty();render();toast('Trilho DIN adicionado — ajuste o comprimento nas Propriedades')});$('#rotateBtn').onclick=rotate;$('#duplicateBtn').onclick=()=>{let p=placed.find(p=>p.id===selected);if(p){let copy={...p,id:'p'+Date.now(),x:p.x+20,y:p.y+20};placed.push(copy);selected=copy.id;markDirty();render()}};$('#deleteBtn').onclick=removeSelected;$('#saveBtn').onclick=persist;$('#exportBtn').onclick=exportPNG;$('#fitBtn').onclick=fit;$('#zoomIn').onclick=()=>{scale=Math.min(2.5,scale*1.15);$('#zoomLabel').textContent=Math.round(scale*100)+'%';render()};$('#zoomOut').onclick=()=>{scale=Math.max(.25,scale/1.15);$('#zoomLabel').textContent=Math.round(scale*100)+'%';render()};$('#stage').addEventListener('dragover',e=>e.preventDefault());$('#stage').addEventListener('drop',e=>{e.preventDefault();let id=e.dataTransfer.getData('part');if(id){let r=svg.getBoundingClientRect();placePart(id,(e.clientX-r.left)/scale,(e.clientY-r.top)/scale)}});svg.addEventListener('pointerdown',e=>{if(e.target===svg){selected=null;render()}});svg.addEventListener('pointermove',movePart);svg.addEventListener('pointerup',endMove);document.addEventListener('keydown',e=>{if(e.key==='Delete'||e.key==='Backspace')removeSelected();if(e.key.toLowerCase()==='r')rotate();if((e.ctrlKey||e.metaKey)&&e.key==='s'){e.preventDefault();persist()}});
