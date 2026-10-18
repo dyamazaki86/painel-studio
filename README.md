@@ -22,6 +22,7 @@ O editor e os arquivos da biblioteca são copiados para a versão final pelo bui
 - `assets/library-admin.js`: janela de administração da biblioteca compartilhada.
 - `supabase/migrations/20261018_admin_library.sql`: catálogo, categorias e permissões da biblioteca.
 - `supabase/migrations/20261019_library_sides.sql`: separa os catálogos do fundo e da tampa e migra os componentes atuais da tampa para a biblioteca compartilhada.
+- `supabase/migrations/20261020_lid_library_hierarchy.sql`: organiza o catálogo da tampa como categoria principal e subcategorias.
 - `assets/components/`: imagens dos componentes enviadas pelo editor.
 
 As imagens enviadas no editor são incorporadas ao projeto e sincronizadas junto com os demais dados da conta. Imagens fixas da biblioteca continuam em `assets/components/`.
@@ -36,7 +37,7 @@ O acesso por perfil usa Supabase Auth e cada projeto fica associado ao identific
 
 1. Crie um projeto no Supabase e ative o provedor de e-mail e senha em **Authentication → Sign In / Providers**.
 2. Em **Project Settings → API**, copie a Project URL e a chave pública (`publishable` ou `anon`) para `assets/supabase-config.js`. Nunca use a chave `service_role` no navegador.
-3. Execute `supabase/migrations/20261016_profiles_and_projects.sql`, `supabase/migrations/20261016_roles_and_admin_access.sql`, `supabase/migrations/20261018_admin_library.sql` e `supabase/migrations/20261019_library_sides.sql`, nessa ordem, no SQL Editor do projeto.
+3. Execute `supabase/migrations/20261016_profiles_and_projects.sql`, `supabase/migrations/20261016_roles_and_admin_access.sql`, `supabase/migrations/20261018_admin_library.sql`, `supabase/migrations/20261019_library_sides.sql` e `supabase/migrations/20261020_lid_library_hierarchy.sql`, nessa ordem, no SQL Editor do projeto.
 4. Promova pelo menos uma conta a admin no SQL Editor, substituindo o e-mail pelo da conta que deve administrar o sistema:
    ```sql
    update public.profiles

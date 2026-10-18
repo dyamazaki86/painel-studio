@@ -400,31 +400,35 @@ let collapsedLibraryCategories=new Set();
 try{collapsedLibraryCategories=new Set(JSON.parse(localStorage.getItem(libraryCollapseKey)||'[]'))}catch{}
 if(!document.getElementById('libraryCollapseStyles')){
   const style=document.createElement('style');style.id='libraryCollapseStyles';style.textContent=`
-    .library-group{margin:2px 0 7px}.chip{overflow:hidden;position:relative}.chip img{display:block!important;width:32px!important;height:34px!important;max-width:32px!important;max-height:34px!important;object-fit:contain!important;border-radius:5px;overflow:hidden}.library-category-toggle{width:100%;display:flex;align-items:center;gap:7px;border:0;background:transparent;text-align:left;padding:9px 18px 6px;color:#9aa3b1;font:700 11px 'Space Grotesk',sans-serif;letter-spacing:.07em;text-transform:uppercase}
+    .library-group{margin:2px 0 7px}.library-group[data-depth="1"]{margin-top:0;margin-bottom:3px}.chip{overflow:hidden;position:relative}.chip img{display:block!important;width:32px!important;height:34px!important;max-width:32px!important;max-height:34px!important;object-fit:contain!important;border-radius:5px;overflow:hidden}.library-category-toggle{width:100%;display:flex;align-items:center;gap:7px;border:0;background:transparent;text-align:left;padding:9px 18px 6px;color:#9aa3b1;font:700 11px 'Space Grotesk',sans-serif;letter-spacing:.07em;text-transform:uppercase}
     .library-category-toggle:hover{background:#f8f9fc;color:#68758a}.library-category-chevron{font-size:10px;transition:transform .15s}.library-category-toggle[aria-expanded="false"] .library-category-chevron{transform:rotate(-90deg)}
     .library-category-count{margin-left:auto;color:#a1a9b6;font:500 10px 'DM Sans',sans-serif;letter-spacing:0}.library-category-items[hidden]{display:none}`;
   document.head.append(style);
 }
 function renderLibrary() {
   const query = $('#search').value.toLowerCase();
-  let categories;
+  const componentMarkup=items=>items.map(p=>
+    `<div class="item ${p.id === selectedLibraryId ? 'selected' : ''}" draggable="true" data-id="${p.id}">
+      <div class="chip${p.shape==='circle'?' chip-round':''}" style="background:${p.image?'transparent':p.color+'22'};color:${p.color}">${p.image ? `<img src="${p.image}" style="display:block;width:32px;height:34px;max-width:32px;max-height:34px;object-fit:contain;border-radius:5px;overflow:hidden">` : p.icon}</div>
+      <div><div class="item-title">${escapeText(p.name)}</div><div class="item-sub">${p.channelProfile ? `Seção fixa ${p.fixedSection} mm · comp. ${p.w} mm` : `${p.w} × ${p.h} mm`}</div></div>
+      <span class="item-add" title="Arraste para adicionar">⠿</span></div>`).join('');
   if(libraryCategories.length){
     const children=new Map();
     for(const category of libraryCategories){const key=category.parent_id||'';children.set(key,[...(children.get(key)||[]),category])}
     children.forEach(rows=>rows.sort((a,b)=>(a.sort_order??0)-(b.sort_order??0)||a.name.localeCompare(b.name,'pt-BR')));
-    const ordered=[];const walk=(parentId='')=>{for(const category of children.get(parentId)||[]){ordered.push(category);walk(category.id)}};walk();
-    categories=ordered.map(category=>({id:category.id,label:parts.find(part=>part.category_id===category.id)?.cat||category.name}));
-  }else categories=[...new Set(parts.map(p => p.cat))].map(cat=>({id:cat,label:cat}));
-  $('#library').innerHTML = categories.map(({id:categoryId,label:cat}) => {
-    const items = parts.filter(p => ((p.category_id||p.categoryId) === categoryId || (!(p.category_id||p.categoryId) && p.cat === cat)) && p.name.toLowerCase().includes(query)).sort((a,b)=>(a.sort_order??0)-(b.sort_order??0)||a.name.localeCompare(b.name,'pt-BR'));
-    if (!items.length) return '';
-    const collapsed=!query&&collapsedLibraryCategories.has(categoryId),key=escapeText(cat),categoryName=escapeText(categoryId);
-    return `<section class="library-group"><button type="button" class="library-category-toggle" data-library-category="${categoryName}" aria-expanded="${!collapsed}"><span class="library-category-chevron">▼</span><span>${key}</span><span class="library-category-count">${items.length}</span></button><div class="library-category-items" ${collapsed?'hidden':''}>` + items.map(p =>
-      `<div class="item ${p.id === selectedLibraryId ? 'selected' : ''}" draggable="true" data-id="${p.id}">
-        <div class="chip${p.shape==='circle'?' chip-round':''}" style="background:${p.image?'transparent':p.color+'22'};color:${p.color}">${p.image ? `<img src="${p.image}" style="display:block;width:32px;height:34px;max-width:32px;max-height:34px;object-fit:contain;border-radius:5px;overflow:hidden">` : p.icon}</div>
-        <div><div class="item-title">${escapeText(p.name)}</div><div class="item-sub">${p.channelProfile ? `Seção fixa ${p.fixedSection} mm · comp. ${p.w} mm` : `${p.w} × ${p.h} mm`}</div></div>
-        <span class="item-add" title="Arraste para adicionar">⠿</span></div>`).join('')+'</div></section>';
-  }).join('');
+    const renderBranch=(parentId='',depth=0)=> (children.get(parentId)||[]).map(category=>{
+      const directItems=parts.filter(part=>(part.category_id||part.categoryId)===category.id&&part.name.toLowerCase().includes(query)).sort((a,b)=>(a.sort_order??0)-(b.sort_order??0)||a.name.localeCompare(b.name,'pt-BR'));
+      const childMarkup=renderBranch(category.id,depth+1);
+      if(!directItems.length&&!childMarkup)return '';
+      const descendantCount=directItems.length+[...parts.filter(part=>part.name.toLowerCase().includes(query)&&libraryCategories.some(child=>child.parent_id===category.id&&child.id===(part.category_id||part.categoryId)))].length;
+      const collapsed=!query&&collapsedLibraryCategories.has(category.id),name=escapeText(category.name),key=escapeText(category.id),indent=18+depth*12;
+      return `<section class="library-group" data-depth="${depth}"><button type="button" class="library-category-toggle" data-library-category="${key}" aria-expanded="${!collapsed}" style="padding-left:${indent}px"><span class="library-category-chevron">▼</span><span>${name}</span><span class="library-category-count">${descendantCount}</span></button><div class="library-category-items" ${collapsed?'hidden':''}>${componentMarkup(directItems)}${collapsed?'':childMarkup}</div></section>`;
+    }).join('');
+    $('#library').innerHTML=renderBranch();
+  }else{
+    const categories=[...new Set(parts.map(part=>part.cat||'Outros'))];
+    $('#library').innerHTML=categories.map(cat=>{const items=parts.filter(part=>(part.cat||'Outros')===cat&&part.name.toLowerCase().includes(query));if(!items.length)return '';const key=escapeText(cat);return `<section class="library-group"><button type="button" class="library-category-toggle" data-library-category="${key}" aria-expanded="true"><span class="library-category-chevron">▼</span><span>${key}</span><span class="library-category-count">${items.length}</span></button><div class="library-category-items">${componentMarkup(items)}</div></section>`}).join('');
+  }
   document.querySelectorAll('#library .library-category-toggle').forEach(button=>button.onclick=()=>{
     const category=button.dataset.libraryCategory;
     if(collapsedLibraryCategories.has(category))collapsedLibraryCategories.delete(category);else collapsedLibraryCategories.add(category);
