@@ -163,7 +163,7 @@ function initializePanelStudioAuth() {
   function loadScript(src) {
     return new Promise((resolve, reject) => {
       const script = document.createElement('script');
-      script.src = `${src}?v=0.3.1`;
+      script.src = `${src}?v=0.3.2`;
       script.onload = resolve;
       script.onerror = () => reject(new Error(`Não foi possível carregar ${src}.`));
       document.body.append(script);
@@ -459,9 +459,67 @@ function initializePanelStudioAuth() {
       window.PANEL_STUDIO_USER = { id: user.id, email: user.email, displayName: user.user_metadata?.full_name || user.email, role };
       window.PANEL_STUDIO_IS_ADMIN = role === 'admin';
       window.PANEL_STUDIO_KEYS = keys;
+      window.PANEL_STUDIO_LIBRARY_API = {
+        isAdmin: role === 'admin',
+        async load() {
+          const [categoryResult, componentResult] = await Promise.all([
+            client.from('library_categories').select('id,name,parent_id,sort_order').order('sort_order').order('name'),
+            client.from('library_components').select('id,name,category_id,width_mm,height_mm,color,icon,image,storage_path,sort_order,metadata').order('sort_order').order('name')
+          ]);
+          if (categoryResult.error) throw categoryResult.error;
+          if (componentResult.error) throw componentResult.error;
+          return { categories: categoryResult.data || [], components: componentResult.data || [] };
+        },
+        async saveCategory(category) {
+          if (role !== 'admin') throw new Error('Apenas administradores podem alterar a biblioteca.');
+          const { error } = await client.from('library_categories').upsert({ ...category, updated_by: user.id, updated_at: new Date().toISOString() });
+          if (error) throw error;
+        },
+        async deleteCategory(id) {
+          if (role !== 'admin') throw new Error('Apenas administradores podem alterar a biblioteca.');
+          const { error } = await client.from('library_categories').delete().eq('id', id);
+          if (error) throw error;
+        },
+        async saveComponent(component) {
+          if (role !== 'admin') throw new Error('Apenas administradores podem alterar a biblioteca.');
+          const { error } = await client.from('library_components').upsert({ ...component, updated_by: user.id, updated_at: new Date().toISOString() });
+          if (error) throw error;
+        },
+        async deleteComponent(id) {
+          if (role !== 'admin') throw new Error('Apenas administradores podem alterar a biblioteca.');
+          const { error } = await client.from('library_components').delete().eq('id', id);
+          if (error) throw error;
+          // Keep uploaded image objects: saved panels may still reference them.
+        },
+        async uploadImage(file, componentId) {
+          if (role !== 'admin') throw new Error('Apenas administradores podem enviar imagens.');
+          const extension = file.name.split('.').pop().toLowerCase().replace(/[^a-z0-9]/g, '') || 'png';
+          const storagePath = `components/${componentId}.${extension}`;
+          const { error } = await client.storage.from('library-assets').upload(storagePath, file, { upsert: true, contentType: file.type, cacheControl: '3600' });
+          if (error) throw error;
+          const { data } = client.storage.from('library-assets').getPublicUrl(storagePath);
+          return { image: data.publicUrl, storage_path: storagePath };
+        }
+      };
+      try {
+        const catalog = await window.PANEL_STUDIO_LIBRARY_API.load();
+        const categoryById = new Map(catalog.categories.map((category) => [category.id, category]));
+        window.PANEL_STUDIO_LIBRARY_DATA = {
+          categories: catalog.categories,
+          components: catalog.components.map((component) => {
+            const category = categoryById.get(component.category_id);
+            const parent = categoryById.get(category?.parent_id);
+            return { ...component, w: Number(component.width_mm), h: Number(component.height_mm), cat: parent ? `${parent.name} / ${category.name}` : (category?.name || 'Outros'), ...(component.metadata || {}) };
+          })
+        };
+      } catch (error) {
+        window.PANEL_STUDIO_LIBRARY_DATA = null;
+        console.warn('Biblioteca compartilhada indisponível; usando o catálogo local. A migração de biblioteca pode não ter sido aplicada.', error);
+      }
       await loadAndCacheProjects(user, keys);
       studioShell.hidden = false;
       await loadScript('assets/profile-storage.js');
+      await loadScript('assets/library-admin.js');
       await loadScript('assets/app.js');
       await loadScript('painel-studio.js');
       addProfileControls(user);

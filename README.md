@@ -19,6 +19,8 @@ O editor e os arquivos da biblioteca são copiados para a versão final pelo bui
 - `editor.html`: editor, aberto após autenticação.
 - `painel-studio.js`: interações e renderização.
 - `components/catalog.js`: biblioteca padrão e dimensões dos componentes.
+- `assets/library-admin.js`: janela de administração da biblioteca compartilhada.
+- `supabase/migrations/20261018_admin_library.sql`: catálogo, categorias e permissões da biblioteca.
 - `assets/components/`: imagens dos componentes enviadas pelo editor.
 
 As imagens enviadas no editor são incorporadas ao projeto e sincronizadas junto com os demais dados da conta. Imagens fixas da biblioteca continuam em `assets/components/`.
@@ -33,7 +35,7 @@ O acesso por perfil usa Supabase Auth e cada projeto fica associado ao identific
 
 1. Crie um projeto no Supabase e ative o provedor de e-mail e senha em **Authentication → Sign In / Providers**.
 2. Em **Project Settings → API**, copie a Project URL e a chave pública (`publishable` ou `anon`) para `assets/supabase-config.js`. Nunca use a chave `service_role` no navegador.
-3. Execute `supabase/migrations/20261016_profiles_and_projects.sql` e depois `supabase/migrations/20261016_roles_and_admin_access.sql` no SQL Editor do projeto.
+3. Execute `supabase/migrations/20261016_profiles_and_projects.sql`, `supabase/migrations/20261016_roles_and_admin_access.sql` e `supabase/migrations/20261018_admin_library.sql`, nessa ordem, no SQL Editor do projeto.
 4. Promova pelo menos uma conta a admin no SQL Editor, substituindo o e-mail pelo da conta que deve administrar o sistema:
    ```sql
    update public.profiles
@@ -46,7 +48,7 @@ O acesso por perfil usa Supabase Auth e cada projeto fica associado ao identific
 
 O cadastro pode exigir confirmação por e-mail, conforme a configuração do Supabase. O botão **Salvar** grava o projeto na conta; alterações em um projeto já salvo também entram na fila de sincronização automática. Cada sessão mantém um cache local separado por usuário.
 
-O menu da conta inclui **Gerenciar usuários** para admins. A lista mostra a role e a quantidade de projetos salvos por perfil; ao selecionar uma conta, o admin pode abrir um de seus projetos. Também é possível alterar cargos entre `user` e `admin`. A role é mantida na tabela `public.profiles`, não nos metadados que o próprio usuário pode alterar. Os controles de inclusão e remoção de componentes da biblioteca também ficam disponíveis apenas para admins; a biblioteca customizada atual continua sendo salva dentro dos dados do projeto.
+O menu da conta inclui **Gerenciar usuários** para admins. A lista mostra a role e a quantidade de projetos salvos por perfil; ao selecionar uma conta, o admin pode abrir um de seus projetos. Também é possível alterar cargos entre `user` e `admin`. A role é mantida na tabela `public.profiles`, não nos metadados que o próprio usuário pode alterar. Admins gerenciam a biblioteca compartilhada pelo botão **Gerenciar** na lateral: podem criar, renomear, ordenar e excluir categorias, subcategorias e componentes.
 
 Imagens novas são incorporadas aos dados do projeto para acompanhá-lo entre computadores. Isso aumenta o tamanho dos dados enviados; imagens fixas já incluídas em `assets/components/` continuam sendo carregadas do repositório.
 

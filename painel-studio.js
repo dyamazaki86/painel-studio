@@ -406,12 +406,19 @@ if(!document.getElementById('libraryCollapseStyles')){
 }
 function renderLibrary() {
   const query = $('#search').value.toLowerCase();
-  const categories = [...new Set(parts.map(p => p.cat))];
-  $('#library').innerHTML = categories.map(cat => {
-    const items = parts.filter(p => p.cat === cat && p.name.toLowerCase().includes(query));
+  let categories;
+  if(libraryCategories.length){
+    const children=new Map();
+    for(const category of libraryCategories){const key=category.parent_id||'';children.set(key,[...(children.get(key)||[]),category])}
+    children.forEach(rows=>rows.sort((a,b)=>(a.sort_order??0)-(b.sort_order??0)||a.name.localeCompare(b.name,'pt-BR')));
+    const ordered=[];const walk=(parentId='')=>{for(const category of children.get(parentId)||[]){ordered.push(category);walk(category.id)}};walk();
+    categories=ordered.map(category=>({id:category.id,label:parts.find(part=>part.category_id===category.id)?.cat||category.name}));
+  }else categories=[...new Set(parts.map(p => p.cat))].map(cat=>({id:cat,label:cat}));
+  $('#library').innerHTML = categories.map(({id:categoryId,label:cat}) => {
+    const items = parts.filter(p => ((p.category_id||p.categoryId) === categoryId || (!(p.category_id||p.categoryId) && p.cat === cat)) && p.name.toLowerCase().includes(query)).sort((a,b)=>(a.sort_order??0)-(b.sort_order??0)||a.name.localeCompare(b.name,'pt-BR'));
     if (!items.length) return '';
-    const collapsed=!query&&collapsedLibraryCategories.has(cat),key=escapeText(cat);
-    return `<section class="library-group"><button type="button" class="library-category-toggle" data-library-category="${key}" aria-expanded="${!collapsed}"><span class="library-category-chevron">▼</span><span>${key}</span><span class="library-category-count">${items.length}</span></button><div class="library-category-items" ${collapsed?'hidden':''}>` + items.map(p =>
+    const collapsed=!query&&collapsedLibraryCategories.has(categoryId),key=escapeText(cat),categoryName=escapeText(categoryId);
+    return `<section class="library-group"><button type="button" class="library-category-toggle" data-library-category="${categoryName}" aria-expanded="${!collapsed}"><span class="library-category-chevron">▼</span><span>${key}</span><span class="library-category-count">${items.length}</span></button><div class="library-category-items" ${collapsed?'hidden':''}>` + items.map(p =>
       `<div class="item ${p.id === selectedLibraryId ? 'selected' : ''}" draggable="true" data-id="${p.id}">
         <div class="chip${p.shape==='circle'?' chip-round':''}" style="background:${p.image?'transparent':p.color+'22'};color:${p.color}">${p.image ? `<img src="${p.image}" style="display:block;width:32px;height:34px;max-width:32px;max-height:34px;object-fit:contain;border-radius:5px;overflow:hidden">` : p.icon}</div>
         <div><div class="item-title">${escapeText(p.name)}</div><div class="item-sub">${p.channelProfile ? `Seção fixa ${p.fixedSection} mm · comp. ${p.w} mm` : `${p.w} × ${p.h} mm`}</div></div>
@@ -585,22 +592,9 @@ function renderProps() {
   if (!p && selectedLibraryId) {
     const lib = parts.find(x => x.id === selectedLibraryId);
     $('#properties').innerHTML = `<div class="section"><div class="props-title">${escapeHTML(lib.name)}</div>
-      <div class="field-label">Nome</div><input id="componentName" class="select" type="text" value="${escapeHTML(lib.name)}">
-      ${categorySelect(lib.cat)}
-      ${lib.channelProfile ? `<div class="item-sub" style="margin-top:10px">Seção fixa: ${lib.fixedSection} mm</div><div class="field-label">Comprimento</div><div class="field"><input id="libW" type="number" min="10" value="${lib.w}"><span class="unit">mm</span></div>` : `<div class="field-row"><div class="field"><div class="field-label">Largura</div><input id="libW" type="number" min="1" value="${lib.w}"><span class="unit">mm</span></div><div class="field"><div class="field-label">Altura</div><input id="libH" type="number" min="1" value="${lib.h}"><span class="unit">mm</span></div></div>`}
-      ${lib.image ? `<img src="${lib.image}" style="width:100%;max-height:140px;object-fit:contain;margin:12px 0;border:1px solid #e6eaf0;border-radius:8px">` : ''}
-      <div class="field-label">Imagem do componente</div><input id="partImage" type="file" accept="image/*" class="select"><div class="item-sub" style="margin-top:5px">Na primeira vez, autorize a pasta raiz do projeto; clique novamente para escolher a imagem. O arquivo será salvo em assets/components.</div>
-      <div class="field-label">Ajuste da imagem</div><select id="imageFit" class="select"><option value="cover" ${(lib.imageFit||'cover')==='cover'?'selected':''}>Preencher área (cortar bordas)</option><option value="contain" ${lib.imageFit==='contain'?'selected':''}>Mostrar imagem inteira</option></select>
-      ${lib.image ? '<div class="mini-actions"><button class="btn" id="removeImage">Remover imagem</button></div>' : ''}
-      <div class="item-sub" style="margin-top:8px">Arraste este item para adicioná-lo ao painel.</div></div>`;
-    $('#componentCategory').onchange = e => { lib.cat=e.target.value;markDirty();renderLibrary();renderProps(); };
-    $('#componentName').onchange=e=>{lib.name=e.target.value.trim()||lib.name;markDirty();renderLibrary();renderProps()};
-    $('#imageFit').onchange=e=>{lib.imageFit=e.target.value;markDirty();renderLibrary();renderProps()};
-    $('#libW').onchange=e=>{lib.w=Math.max(10,+e.target.value||10);markDirty();renderLibrary();renderProps()};
-    if ($('#libH')) $('#libH').onchange=e=>{lib.h=Math.max(1,+e.target.value||1);markDirty();renderLibrary();renderProps()};
-    prepareImageUploadPicker($('#partImage'));
-    $('#partImage').onchange=e=>{const file=e.target.files?.[0];if(!file)return;saveComponentImage(file,lib).then(()=>{renderLibrary();renderProps()});};
-    if ($('#removeImage')) $('#removeImage').onclick=()=>{delete lib.image;markDirty();renderLibrary();renderProps()};
+      <div class="item-sub" style="margin-top:7px">${escapeHTML(lib.cat||'Outros')} · ${lib.w} × ${lib.h} mm</div>
+      ${lib.image ? `<img src="${lib.image}" alt="" style="width:100%;max-height:150px;object-fit:contain;margin:12px 0;border:1px solid #e6eaf0;border-radius:8px">` : ''}
+      <div class="item-sub" style="margin-top:8px">Arraste este item para adicioná-lo ao painel.${window.PANEL_STUDIO_IS_ADMIN?' Para alterar o cadastro, use Gerenciar na biblioteca.':''}</div></div>`;
     return;
   }
   if (!p) { $('#properties').innerHTML='<div class="empty">Selecione um item da biblioteca ou componente do painel.</div>'; return; }
@@ -908,6 +902,14 @@ const stopPan=e=>{if(panPointer!==e.pointerId)return;panPointer=null;if(stage.ha
 stage.addEventListener('wheel',e=>{e.preventDefault();const oldRect=svg.getBoundingClientRect(),anchorX=(e.clientX-oldRect.left)/scale,anchorY=(e.clientY-oldRect.top)/scale;scale=Math.max(.25,Math.min(2.5,scale*Math.exp(-e.deltaY*.001)));$('#zoomLabel').textContent=Math.round(scale*100)+'%';render();const newRect=svg.getBoundingClientRect();panX+=e.clientX-(newRect.left+anchorX*scale);panY+=e.clientY-(newRect.top+anchorY*scale);applyPan()},{passive:false});
 $('#fitBtn').onclick=()=>{panX=0;panY=0;const {w,h}=panel();scale=Math.max(.25,Math.min((stage.clientWidth-100)/w,(stage.clientHeight-100)/h,1));$('#zoomLabel').textContent=Math.round(scale*100)+'%';render();applyPan()};
 renderLibrary();render();
+window.PANEL_STUDIO_APPLY_SHARED_LIBRARY=()=>{
+  libraryCategories=window.PANEL_STUDIO_LIBRARY_DATA?.categories||[];
+  backplaneParts=mergeSavedParts(backplaneParts);
+  lidParts=mergeSavedParts(lidParts);
+  parts=editorView==='lid'?lidParts:backplaneParts;
+  if(selectedLibraryId&&!parts.some(part=>part.id===selectedLibraryId))selectedLibraryId=null;
+  renderLibrary();render();
+};
 
 
 
