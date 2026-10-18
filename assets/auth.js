@@ -163,7 +163,7 @@ function initializePanelStudioAuth() {
   function loadScript(src) {
     return new Promise((resolve, reject) => {
       const script = document.createElement('script');
-      script.src = `${src}?v=0.3.2`;
+      script.src = `${src}?v=0.3.3`;
       script.onload = resolve;
       script.onerror = () => reject(new Error(`Não foi possível carregar ${src}.`));
       document.body.append(script);

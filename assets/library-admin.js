@@ -20,7 +20,7 @@
       <section class="library-admin-dialog" role="dialog" aria-modal="true" aria-labelledby="libraryAdminTitle" tabindex="-1">
         <header class="library-admin-heading"><div><span class="library-admin-eyebrow">ADMINISTRAÇÃO</span><h2 id="libraryAdminTitle">Biblioteca de componentes</h2><p>Organize categorias e componentes compartilhados com todos os perfis.</p></div><button class="library-admin-close" type="button" aria-label="Fechar">×</button></header>
         <div class="library-admin-body">
-          <aside class="library-admin-categories"><div class="library-admin-section-heading"><strong>Categorias</strong><button class="btn" data-action="add-category">＋ Categoria</button></div><button class="btn library-admin-add-sub" data-action="add-subcategory">＋ Subcategoria</button><div class="library-admin-category-list"></div><p class="library-admin-note">Selecione uma categoria para listar seus componentes. Use ↑ e ↓ para ordenar.</p></aside>
+          <aside class="library-admin-categories"><div class="library-admin-section-heading"><strong>Categorias</strong><button class="btn" type="button" data-action="add-category">＋ Categoria</button></div><button class="btn library-admin-add-sub" type="button" data-action="add-subcategory">＋ Subcategoria</button><form class="library-admin-category-form" hidden><strong data-category-form-title>Nova categoria</strong><label>Nome da categoria<input name="name" required maxlength="80" placeholder="Ex.: Proteção"></label><input name="id" type="hidden"><input name="parentId" type="hidden"><input name="sortOrder" type="hidden"><div class="library-admin-form-actions"><button class="btn" type="button" data-action="cancel-category">Cancelar</button><button class="btn primary" type="submit">Salvar categoria</button></div></form><div class="library-admin-category-list"></div><p class="library-admin-note">Selecione uma categoria para listar seus componentes. Use ↑ e ↓ para ordenar.</p></aside>
           <section class="library-admin-components"><div class="library-admin-section-heading"><strong class="library-admin-current-category">Componentes</strong><button class="btn primary" data-action="new-component">＋ Componente</button></div><div class="library-admin-component-list"></div><form class="library-admin-form" hidden>
             <div class="library-admin-form-heading"><strong data-form-title>Novo componente</strong><button class="btn icon" type="button" data-action="cancel-edit" aria-label="Fechar edição">×</button></div>
             <input type="hidden" name="id"><label>Nome<input name="name" required maxlength="120" placeholder="Ex.: Disjuntor WEG MDW"></label>
@@ -36,12 +36,14 @@
     const dialog = backdrop.querySelector('.library-admin-dialog');
     const categoryList = backdrop.querySelector('.library-admin-category-list');
     const componentList = backdrop.querySelector('.library-admin-component-list');
+    const categoryForm = backdrop.querySelector('.library-admin-category-form');
     const form = backdrop.querySelector('.library-admin-form');
     const status = backdrop.querySelector('.library-admin-status');
     let categories = [];
     let components = [];
     let selectedCategoryId = null;
     let editingId = null;
+    let editingCategoryId = null;
 
     const setStatus = (message = '', isError = false) => {
       status.textContent = message;
@@ -76,8 +78,8 @@
       categoryList.innerHTML = flat.map((category) => `
         <div class="library-admin-category-row${category.id === selectedCategoryId ? ' is-selected' : ''}" style="--depth:${category.depth}">
           <button class="library-admin-category-select" type="button" data-select-category="${escapeHtml(category.id)}"><span>${category.depth ? '↳ ' : ''}${escapeHtml(category.name)}</span><small>${components.filter((item) => item.category_id === category.id).length}</small></button>
-          <button type="button" data-category-move="up" data-id="${escapeHtml(category.id)}" aria-label="Mover ${escapeHtml(category.name)} para cima">↑</button><button type="button" data-category-move="down" data-id="${escapeHtml(category.id)}" aria-label="Mover ${escapeHtml(category.name)} para baixo">↓</button>
-          <button type="button" data-category-rename="${escapeHtml(category.id)}" aria-label="Renomear ${escapeHtml(category.name)}">✎</button><button type="button" class="is-danger" data-category-delete="${escapeHtml(category.id)}" aria-label="Excluir ${escapeHtml(category.name)}">×</button>
+          <button type="button" data-category-move="up" data-id="${escapeHtml(category.id)}" title="Mover para cima" aria-label="Mover ${escapeHtml(category.name)} para cima">↑</button><button type="button" data-category-move="down" data-id="${escapeHtml(category.id)}" title="Mover para baixo" aria-label="Mover ${escapeHtml(category.name)} para baixo">↓</button>
+          <button type="button" data-category-rename="${escapeHtml(category.id)}" title="Editar categoria" aria-label="Editar categoria ${escapeHtml(category.name)}">✎</button><button type="button" class="is-danger" data-category-delete="${escapeHtml(category.id)}" aria-label="Excluir ${escapeHtml(category.name)}">×</button>
         </div>`).join('');
       const selectedCategory = categories.find((category) => category.id === selectedCategoryId);
       backdrop.querySelector('.library-admin-current-category').textContent = selectedCategory ? selectedCategory.name : 'Componentes';
@@ -85,10 +87,11 @@
       form.elements.categoryId.innerHTML = choices;
       const entries = components.filter((item) => !selectedCategoryId || item.category_id === selectedCategoryId);
       componentList.innerHTML = entries.length ? entries.map((item, index) => `
-        <article class="library-admin-component-row"><div class="library-admin-component-thumb">${item.image ? `<img src="${escapeHtml(item.image)}" alt="">` : `<span>${escapeHtml(item.icon || '▦')}</span>`}</div><div class="library-admin-component-info"><strong>${escapeHtml(item.name)}</strong><span>${item.width_mm} × ${item.height_mm} mm</span></div><div class="library-admin-row-actions"><button type="button" data-component-move="up" data-id="${escapeHtml(item.id)}" aria-label="Mover ${escapeHtml(item.name)} para cima">↑</button><button type="button" data-component-move="down" data-id="${escapeHtml(item.id)}" aria-label="Mover ${escapeHtml(item.name)} para baixo">↓</button><button type="button" data-component-edit="${escapeHtml(item.id)}">Editar</button><button type="button" class="is-danger" data-component-delete="${escapeHtml(item.id)}" aria-label="Excluir ${escapeHtml(item.name)}">${'<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6M10 11v5M14 11v5"/></svg>'}</button></div></article>`).join('') : '<div class="library-admin-empty">Nenhum componente nesta categoria.</div>';
+        <article class="library-admin-component-row"><div class="library-admin-component-thumb">${item.image ? `<img src="${escapeHtml(item.image)}" alt="">` : `<span>${escapeHtml(item.icon || '▦')}</span>`}</div><div class="library-admin-component-info"><strong>${escapeHtml(item.name)}</strong><span>${item.width_mm} × ${item.height_mm} mm</span></div><div class="library-admin-row-actions"><button type="button" data-component-move="up" data-id="${escapeHtml(item.id)}" title="Mover para cima" aria-label="Mover ${escapeHtml(item.name)} para cima">↑</button><button type="button" data-component-move="down" data-id="${escapeHtml(item.id)}" title="Mover para baixo" aria-label="Mover ${escapeHtml(item.name)} para baixo">↓</button><button type="button" data-component-edit="${escapeHtml(item.id)}" title="Editar componente" aria-label="Editar ${escapeHtml(item.name)}">Editar</button><button type="button" class="is-danger" data-component-delete="${escapeHtml(item.id)}" aria-label="Excluir ${escapeHtml(item.name)}">${'<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6M10 11v5M14 11v5"/></svg>'}</button></div></article>`).join('') : '<div class="library-admin-empty">Nenhum componente nesta categoria.</div>';
       backdrop.querySelector('[data-action="add-subcategory"]').disabled = !selectedCategoryId || Boolean(selectedCategory?.parent_id);
     };
     const showForm = (component = null) => {
+      categoryForm.hidden = true;
       if (!categories.length) return setStatus('Crie uma categoria antes de adicionar componentes.', true);
       editingId = component?.id || null;
       form.reset();
@@ -107,6 +110,20 @@
       form.hidden = false;
       form.elements.name.focus();
     };
+    const showCategoryForm = ({ category = null, parentId = null } = {}) => {
+      categoryForm.reset();
+      editingCategoryId = category?.id || null;
+      categoryForm.elements.id.value = category?.id || '';
+      categoryForm.elements.parentId.value = category?.parent_id || parentId || '';
+      const siblings = categories.filter((item) => (item.parent_id || '') === (category?.parent_id || parentId || ''));
+      categoryForm.elements.sortOrder.value = String(category?.sort_order ?? siblings.length);
+      categoryForm.elements.name.value = category?.name || '';
+      categoryForm.querySelector('[data-category-form-title]').textContent = category ? 'Editar categoria' : parentId ? 'Nova subcategoria' : 'Nova categoria';
+      componentList.hidden = true;
+      form.hidden = true;
+      categoryForm.hidden = false;
+      categoryForm.elements.name.focus();
+    };
     const moveInGroup = async (rows, id, direction, save) => {
       const index = rows.findIndex((row) => row.id === id);
       const next = index + (direction === 'up' ? -1 : 1);
@@ -120,25 +137,14 @@
     backdrop.querySelector('.library-admin-close').addEventListener('click', close);
     backdrop.addEventListener('click', (event) => { if (event.target === backdrop) close(); });
     dialog.addEventListener('keydown', (event) => { if (event.key === 'Escape') close(); });
-    backdrop.querySelector('[data-action="cancel-edit"]').addEventListener('click', () => { form.hidden = true; componentList.hidden = false; });
-    backdrop.querySelector('[data-action="add-category"]').addEventListener('click', async () => {
-      const name = prompt('Nome da nova categoria:');
-      if (!name?.trim()) return;
-      const siblings = categories.filter((category) => !category.parent_id);
-      const category = { id: `cat-${crypto.randomUUID()}`, name: name.trim(), parent_id: null, sort_order: siblings.length };
-      try { await api.saveCategory(category); selectedCategoryId = category.id; await refresh(); toast('Categoria criada'); }
-      catch (error) { setStatus(`Não foi possível criar a categoria. ${error.message}`, true); }
-    });
-    backdrop.querySelector('[data-action="add-subcategory"]').addEventListener('click', async () => {
+    backdrop.querySelectorAll('[data-action="cancel-edit"]').forEach((button) => button.addEventListener('click', () => { form.reset(); editingId = null; form.hidden = true; componentList.hidden = false; }));
+    backdrop.querySelector('[data-action="cancel-category"]').addEventListener('click', () => { categoryForm.reset(); editingCategoryId = null; categoryForm.hidden = true; componentList.hidden = false; });
+    backdrop.querySelector('[data-action="add-category"]').addEventListener('click', () => showCategoryForm());
+    backdrop.querySelector('[data-action="add-subcategory"]').addEventListener('click', () => {
       const parent = categories.find((category) => category.id === selectedCategoryId);
       if (!parent) return;
       if (parent.parent_id) return setStatus('As subcategorias podem ter apenas um nível de profundidade.', true);
-      const name = prompt(`Nome da subcategoria de ${parent.name}:`);
-      if (!name?.trim()) return;
-      const siblings = categories.filter((category) => category.parent_id === parent.id);
-      const category = { id: `cat-${crypto.randomUUID()}`, name: name.trim(), parent_id: parent.id, sort_order: siblings.length };
-      try { await api.saveCategory(category); selectedCategoryId = category.id; await refresh(); toast('Subcategoria criada'); }
-      catch (error) { setStatus(`Não foi possível criar a subcategoria. ${error.message}`, true); }
+      showCategoryForm({ parentId: parent.id });
     });
     backdrop.querySelector('[data-action="new-component"]').addEventListener('click', () => showForm());
     categoryList.addEventListener('click', async (event) => {
@@ -153,10 +159,8 @@
       const rename = event.target.closest('[data-category-rename]');
       if (rename) {
         const category = categories.find((item) => item.id === rename.dataset.categoryRename);
-        const name = prompt('Nome da categoria:', category.name);
-        if (!name?.trim() || name.trim() === category.name) return;
-        try { await api.saveCategory({ ...category, name: name.trim() }); await refresh(); }
-        catch (error) { setStatus(`Não foi possível renomear a categoria. ${error.message}`, true); } return;
+        if (category) showCategoryForm({ category });
+        return;
       }
       const remove = event.target.closest('[data-category-delete]');
       if (remove) {
@@ -200,6 +204,25 @@
         form.hidden = true; componentList.hidden = false;
         await refresh(); toast(old ? 'Componente atualizado' : 'Componente adicionado à biblioteca');
       } catch (error) { setStatus(`Não foi possível salvar o componente. ${error.message}`, true); }
+    });
+    categoryForm.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const name = categoryForm.elements.name.value.trim();
+      if (!name) return;
+      const wasEditing = Boolean(editingCategoryId);
+      const id = editingCategoryId || `cat-${crypto.randomUUID()}`;
+      const category = { id, name, parent_id: categoryForm.elements.parentId.value || null, sort_order: Number(categoryForm.elements.sortOrder.value) || 0 };
+      setStatus('Salvando categoria…');
+      try {
+        await api.saveCategory(category);
+        selectedCategoryId = id;
+        categoryForm.reset();
+        editingCategoryId = null;
+        categoryForm.hidden = true;
+        componentList.hidden = false;
+        await refresh();
+        toast(wasEditing ? 'Categoria atualizada' : category.parent_id ? 'Subcategoria criada' : 'Categoria criada');
+      } catch (error) { setStatus(`Não foi possível salvar a categoria. ${error.message}`, true); }
     });
   };
 })();
