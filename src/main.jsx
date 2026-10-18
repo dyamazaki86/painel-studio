@@ -92,6 +92,16 @@ function AuthView() {
             </Stack>
             <Button className="auth-submit" id="authSubmit" type="submit" fullWidth variant="contained"><span>Entrar</span><span aria-hidden="true">→</span></Button>
           </Box>
+          <Paper className="demo-access" elevation={0} aria-label="Dados de login para demonstração">
+            <Box className="demo-access-heading">
+              <span className="demo-access-dot" aria-hidden="true" />
+              <Typography component="span">ACESSO DE DEMONSTRAÇÃO</Typography>
+            </Box>
+            <Stack className="demo-access-values" direction="row" spacing={1}>
+              <Box className="demo-access-value"><span>Login</span><strong>visitante</strong></Box>
+              <Box className="demo-access-value"><span>Senha</span><strong>visitante</strong></Box>
+            </Stack>
+          </Paper>
           <Box className="auth-message" id="authMessage" role="status" aria-live="polite" hidden />
           <Box className="auth-setup" id="authSetup" hidden>
             <strong>Conecte o Supabase para ativar as contas.</strong>
