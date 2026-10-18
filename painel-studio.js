@@ -296,6 +296,45 @@ $('#newBtn').onclick=()=>{
 if(activeProjectId){const active=savedProjects.find(project=>project.id===activeProjectId);if(active)$('#projectName').textContent=active.name}else $('#projectName').textContent=localStorage.getItem('painel-studio-draft-name')||'Novo projeto';
 renderProjectArchive();
 
+// Lista de materiais consolidada do fundo e da tampa do projeto.
+const materialsButton=document.createElement('button');
+materialsButton.className='btn';materialsButton.id='materialsButton';materialsButton.type='button';materialsButton.textContent='☷ Materiais';materialsButton.setAttribute('aria-label','Abrir lista de materiais');
+$('#exportBtn').insertAdjacentElement('beforebegin',materialsButton);
+const materialsModal=document.createElement('div');
+materialsModal.className='modal-back materials-backdrop';materialsModal.id='materialsModal';
+materialsModal.innerHTML='<section class="modal materials-modal" role="dialog" aria-modal="true" aria-labelledby="materialsTitle" tabindex="-1"><div class="materials-heading"><div><span class="profile-dialog-eyebrow">PROJETO</span><h2 id="materialsTitle">Lista de materiais</h2><p class="materials-subtitle"></p></div><button class="btn icon" type="button" data-materials-close title="Fechar" aria-label="Fechar lista de materiais">×</button></div><div class="materials-table-wrap"><table class="materials-table"><thead><tr><th>Qtd.</th><th>Material</th><th>Categoria</th><th>Lado</th><th>Dimensões</th></tr></thead><tbody></tbody></table><p class="materials-empty" hidden>Nenhum componente foi posicionado neste projeto.</p></div><div class="materials-actions"><button class="btn" type="button" data-materials-close>Fechar</button><button class="btn primary" type="button" id="downloadMaterialsCsv">Baixar CSV</button></div></section>';
+document.body.append(materialsModal);
+function buildBillOfMaterials(){
+  rememberEditorView();
+  const records=[['Fundo',backplanePlaced],['Tampa',lidPlaced]],items=new Map();
+  for(const [side,placedItems] of records)for(const part of placedItems||[]){
+    const isRail=part.type==='rail',size=isRail?{w:part.length??part.w??0,h:35}:partSize(part),name=part.name||(isRail?'Trilho DIN 35 mm':'Componente'),category=part.cat||(isRail?'Trilho':'Outros');
+    const dimensions=isRail?`${Math.round(size.w)} mm`: `${Math.round(size.w*10)/10} × ${Math.round(size.h*10)/10} mm`;
+    const key=[side,name,category,dimensions].join('|'),current=items.get(key);
+    if(current)current.quantity+=1;else items.set(key,{quantity:1,name,category,side,dimensions});
+  }
+  return [...items.values()].sort((a,b)=>a.side.localeCompare(b.side,'pt-BR')||a.category.localeCompare(b.category,'pt-BR')||a.name.localeCompare(b.name,'pt-BR'));
+}
+let currentMaterialRows=[];
+function renderBillOfMaterials(){
+  currentMaterialRows=buildBillOfMaterials();
+  const body=materialsModal.querySelector('tbody'),empty=materialsModal.querySelector('.materials-empty'),table=materialsModal.querySelector('.materials-table');
+  const total=currentMaterialRows.reduce((sum,item)=>sum+item.quantity,0);
+  materialsModal.querySelector('.materials-subtitle').textContent=`${$('#projectName').textContent.trim()||'Projeto sem nome'} · ${total} item(ns) em ${currentMaterialRows.length} linha(s)`;
+  body.innerHTML=currentMaterialRows.map(item=>`<tr><td>${item.quantity}</td><td>${escapeText(item.name)}</td><td>${escapeText(item.category)}</td><td>${item.side}</td><td>${escapeText(item.dimensions)}</td></tr>`).join('');
+  table.hidden=!currentMaterialRows.length;empty.hidden=!!currentMaterialRows.length;
+}
+function downloadBillOfMaterials(){
+  if(!currentMaterialRows.length){toast('Adicione componentes ao painel para gerar a lista.');return}
+  const quote=value=>`"${String(value).replace(/"/g,'""')}"`,lines=[['Quantidade','Material','Categoria','Lado','Dimensões'].map(quote).join(';'),...currentMaterialRows.map(item=>[item.quantity,item.name,item.category,item.side,item.dimensions].map(quote).join(';'))],blob=new Blob(['\ufeff'+lines.join('\r\n')],{type:'text/csv;charset=utf-8'}),url=URL.createObjectURL(blob),link=document.createElement('a');
+  link.href=url;link.download=`materiais-${($('#panelName').value||'painel').toLowerCase().replace(/[^a-z0-9-]+/g,'-')}.csv`;link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);toast('Lista de materiais exportada em CSV');
+}
+materialsButton.addEventListener('click',()=>{renderBillOfMaterials();materialsModal.style.display='flex';materialsModal.querySelector('.materials-modal').focus()});
+materialsModal.querySelectorAll('[data-materials-close]').forEach(button=>button.addEventListener('click',()=>materialsModal.style.display='none'));
+materialsModal.addEventListener('click',event=>{if(event.target===materialsModal)materialsModal.style.display='none'});
+materialsModal.querySelector('#downloadMaterialsCsv').addEventListener('click',downloadBillOfMaterials);
+materialsModal.addEventListener('keydown',event=>{if(event.key==='Escape')materialsModal.style.display='none'});
+
 // Cloud account synchronization: the project data stays in the profile-scoped cache
 // first, then is queued to Supabase so an interrupted connection cannot lose edits.
 const markDirtyWithCloudSync = markDirty;
@@ -644,7 +683,7 @@ function decorateRails() {
     if(!g)return; g.dataset.railId=r.id;
     const anchor=document.createElementNS('http://www.w3.org/2000/svg','line');
     anchor.setAttribute('x1',x);anchor.setAttribute('x2',x+(r.length??r.w??w-70));anchor.setAttribute('y1',r.y);anchor.setAttribute('y2',r.y);
-    anchor.setAttribute('stroke','#3155c6');anchor.setAttribute('stroke-width',1.5/scale);anchor.setAttribute('stroke-dasharray',`${5/scale} ${3/scale}`);anchor.setAttribute('pointer-events','none');g.append(anchor);
+    anchor.setAttribute('class','rail-guide');anchor.setAttribute('stroke','#3155c6');anchor.setAttribute('stroke-width',1.5/scale);anchor.setAttribute('stroke-dasharray',`${5/scale} ${3/scale}`);anchor.setAttribute('pointer-events','none');g.append(anchor);
     if(r.id===selected) for(const side of ['left','right']) {
       const handle=document.createElementNS('http://www.w3.org/2000/svg','rect');
       handle.setAttribute('class','rail-handle '+side);handle.setAttribute('x',side==='left'?x-4:x+(r.length??r.w??w-70)-5);
@@ -690,14 +729,14 @@ function decorateAnchors() {
   const p=placed.find(item=>item.id===selected&&item.type!=='rail'&&!item.channelProfile&&!/canaleta/i.test(item.name||''));if(!p)return;
   const g=[...svg.children].find(el=>el.localName==='g'&&el.getAttribute('transform')===`translate(${p.x},${p.y})`);if(!g)return;
   const {w,h}=partSize(p),ns='http://www.w3.org/2000/svg';
-  const halo=document.createElementNS(ns,'circle');halo.setAttribute('cx',w/2);halo.setAttribute('cy',h/2);halo.setAttribute('r',3.2);halo.setAttribute('fill','#fff');halo.setAttribute('fill-opacity','.72');halo.setAttribute('stroke','#3155c6');halo.setAttribute('stroke-opacity','.6');halo.setAttribute('stroke-width',.8);halo.setAttribute('pointer-events','none');
-  const point=document.createElementNS(ns,'circle');point.setAttribute('cx',w/2);point.setAttribute('cy',h/2);point.setAttribute('r',1.5);point.setAttribute('fill','#3155c6');point.setAttribute('fill-opacity','.72');point.setAttribute('pointer-events','none');g.append(halo,point);
+  const halo=document.createElementNS(ns,'circle');halo.setAttribute('class','editor-anchor-halo');halo.setAttribute('cx',w/2);halo.setAttribute('cy',h/2);halo.setAttribute('r',3.2);halo.setAttribute('fill','#fff');halo.setAttribute('fill-opacity','.72');halo.setAttribute('stroke','#3155c6');halo.setAttribute('stroke-opacity','.6');halo.setAttribute('stroke-width',.8);halo.setAttribute('pointer-events','none');
+  const point=document.createElementNS(ns,'circle');point.setAttribute('class','editor-anchor-point');point.setAttribute('cx',w/2);point.setAttribute('cy',h/2);point.setAttribute('r',1.5);point.setAttribute('fill','#3155c6');point.setAttribute('fill-opacity','.72');point.setAttribute('pointer-events','none');g.append(halo,point);
 }
 function decorateLocks(){
   const ns='http://www.w3.org/2000/svg',size=12/scale;
   const badge=(group,x,y)=>{
     if(!group)return;
-    const icon=document.createElementNS(ns,'g');icon.setAttribute('pointer-events','none');icon.setAttribute('aria-label','Componente travado');icon.setAttribute('transform',`translate(${x},${y})`);
+    const icon=document.createElementNS(ns,'g');icon.setAttribute('class','editor-lock-badge');icon.setAttribute('pointer-events','none');icon.setAttribute('aria-label','Componente travado');icon.setAttribute('transform',`translate(${x},${y})`);
     const bg=document.createElementNS(ns,'rect');bg.setAttribute('width',size);bg.setAttribute('height',size);bg.setAttribute('rx',2/scale);bg.setAttribute('fill','#fff');bg.setAttribute('fill-opacity','.96');bg.setAttribute('stroke','#cbd5e1');bg.setAttribute('stroke-width',.7/scale);
     const shackle=document.createElementNS(ns,'path');shackle.setAttribute('d',`M${size*.34} ${size*.49}V${size*.37}a${size*.16} ${size*.16} 0 0 1 ${size*.32} 0v${size*.12}`);shackle.setAttribute('fill','none');shackle.setAttribute('stroke','#344256');shackle.setAttribute('stroke-width',1.15/scale);shackle.setAttribute('stroke-linecap','round');
     const body=document.createElementNS(ns,'rect');body.setAttribute('x',size*.28);body.setAttribute('y',size*.46);body.setAttribute('width',size*.44);body.setAttribute('height',size*.38);body.setAttribute('rx',1/scale);body.setAttribute('fill','#475569');
