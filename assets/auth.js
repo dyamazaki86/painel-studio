@@ -163,7 +163,7 @@ function initializePanelStudioAuth() {
   function loadScript(src) {
     return new Promise((resolve, reject) => {
       const script = document.createElement('script');
-      script.src = `${src}?v=0.3.3`;
+      script.src = `${src}?v=0.3.4`;
       script.onload = resolve;
       script.onerror = () => reject(new Error(`Não foi possível carregar ${src}.`));
       document.body.append(script);
@@ -463,7 +463,7 @@ function initializePanelStudioAuth() {
         isAdmin: role === 'admin',
         async load() {
           const [categoryResult, componentResult] = await Promise.all([
-            client.from('library_categories').select('id,name,parent_id,sort_order').order('sort_order').order('name'),
+            client.from('library_categories').select('id,name,parent_id,sort_order,side').order('sort_order').order('name'),
             client.from('library_components').select('id,name,category_id,width_mm,height_mm,color,icon,image,storage_path,sort_order,metadata').order('sort_order').order('name')
           ]);
           if (categoryResult.error) throw categoryResult.error;
@@ -505,11 +505,12 @@ function initializePanelStudioAuth() {
         const catalog = await window.PANEL_STUDIO_LIBRARY_API.load();
         const categoryById = new Map(catalog.categories.map((category) => [category.id, category]));
         window.PANEL_STUDIO_LIBRARY_DATA = {
+          sidesEnabled: true,
           categories: catalog.categories,
           components: catalog.components.map((component) => {
             const category = categoryById.get(component.category_id);
             const parent = categoryById.get(category?.parent_id);
-            return { ...component, w: Number(component.width_mm), h: Number(component.height_mm), cat: parent ? `${parent.name} / ${category.name}` : (category?.name || 'Outros'), ...(component.metadata || {}) };
+            return { ...component, side: category?.side || 'back', w: Number(component.width_mm), h: Number(component.height_mm), cat: parent ? `${parent.name} / ${category.name}` : (category?.name || 'Outros'), ...(component.metadata || {}) };
           })
         };
       } catch (error) {

@@ -157,17 +157,18 @@ const defaultLidParts=[
   {id:'lid-pilot-yellow',name:'Sinalizador amarelo Ø22 mm',cat:'Sinalizadores',w:22,h:22,color:'#e8b73b',icon:'',shape:'circle'},
   {id:'lid-id-plate',name:'Placa de identificação 60 × 20 mm',cat:'Identificação',w:60,h:20,color:'#e7ebf1',icon:'ID'}
 ];
-function mergeLidParts(saved=[]){const list=Array.isArray(saved)?saved:[],byId=new Map(list.map(part=>[part.id,part])),known=new Set(defaultLidParts.map(part=>part.id));return [...defaultLidParts.map(part=>({...part,...(byId.get(part.id)||{})})),...list.filter(part=>!known.has(part.id))]}
+function mergeLidParts(saved=[],catalog=(window.PANEL_STUDIO_LIBRARY_DATA?.components||[]).filter(part=>part.side==='lid'),sharedConfigured=window.PANEL_STUDIO_LIBRARY_DATA?.sidesEnabled===true){const list=Array.isArray(saved)?saved:[],catalogIds=new Set(catalog.map(part=>part.id)),legacyIds=new Set(defaultLidParts.map(part=>part.id));if(sharedConfigured)return [...catalog.map(part=>({...part})),...list.filter(part=>!catalogIds.has(part.id)&&!legacyIds.has(part.id))];const byId=new Map(list.map(part=>[part.id,part])),known=new Set(defaultLidParts.map(part=>part.id));return [...defaultLidParts.map(part=>({...part,...(byId.get(part.id)||{})})),...list.filter(part=>!known.has(part.id))]}
 let editorView='back',backplaneParts=parts,backplanePlaced=placed;
 const initialLidState=window.PANEL_STUDIO_INITIAL_LID||{};
 let lidParts=mergeLidParts(initialLidState.parts),lidPlaced=JSON.parse(JSON.stringify(initialLidState.placed||[]));
 function rememberEditorView(){if(editorView==='lid'){lidParts=parts;lidPlaced=placed}else{backplaneParts=parts;backplanePlaced=placed}}
 function restoreEditorView(view){editorView=view==='lid'?'lid':'back';parts=editorView==='lid'?lidParts:backplaneParts;placed=editorView==='lid'?lidPlaced:backplanePlaced}
+function syncSharedLibraryForCurrentSide(){const data=window.PANEL_STUDIO_LIBRARY_DATA;if(!data)return;const categories=data.categories||[],catalog=data.components||[],backCategories=categories.filter(category=>(category.side||'back')==='back'),lidCategories=categories.filter(category=>category.side==='lid'),backIds=new Set(backCategories.map(category=>category.id)),lidIds=new Set(lidCategories.map(category=>category.id)),backCatalog=catalog.filter(component=>backIds.has(component.category_id)),lidCatalog=catalog.filter(component=>lidIds.has(component.category_id));backplaneParts=mergeSavedParts(backplaneParts,backCatalog);lidParts=mergeLidParts(lidParts,lidCatalog,lidCategories.length>0);libraryCategories=editorView==='lid'?lidCategories:backCategories;parts=editorView==='lid'?lidParts:backplaneParts}
 function syncViewChrome(){const lid=editorView==='lid',backButton=$('#viewBack'),lidButton=$('#viewLid');if(backButton){backButton.classList.toggle('is-active',!lid);backButton.setAttribute('aria-pressed',String(!lid))}if(lidButton){lidButton.classList.toggle('is-active',lid);lidButton.setAttribute('aria-pressed',String(lid))}const title=$('#libraryTitle');if(title)title.textContent=lid?'Biblioteca da tampa':'Biblioteca';$('#railBtn').hidden=lid;const {w,h}=panel();$('#boardLabel').textContent=`${lid?'Tampa':'Fundo'} · ${$('#panelName').value||'Painel'} · ${w} × ${h} mm`}
-function switchEditorView(view){const target=view||(editorView==='back'?'lid':'back');if(target===editorView)return;rememberEditorView();restoreEditorView(target);selected=null;selectedIds.clear();selectedLibraryId=null;undoStack=[];finishUndoAction();syncViewChrome();renderLibrary();render();$('#fitBtn').click()}
+function switchEditorView(view){const target=view||(editorView==='back'?'lid':'back');if(target===editorView)return;rememberEditorView();restoreEditorView(target);syncSharedLibraryForCurrentSide();selected=null;selectedIds.clear();selectedLibraryId=null;undoStack=[];finishUndoAction();syncViewChrome();renderLibrary();render();$('#fitBtn').click()}
 $('#viewBack').addEventListener('click',()=>switchEditorView('back'));
 $('#viewLid').addEventListener('click',()=>switchEditorView('lid'));
-if(initialLidState.view==='lid')restoreEditorView('lid');
+if(initialLidState.view==='lid')restoreEditorView('lid');syncSharedLibraryForCurrentSide();
 undoStack=[];lastHistoryState=JSON.parse(JSON.stringify(historyState()));
 
 const renderBase = window.render;
@@ -903,10 +904,7 @@ stage.addEventListener('wheel',e=>{e.preventDefault();const oldRect=svg.getBound
 $('#fitBtn').onclick=()=>{panX=0;panY=0;const {w,h}=panel();scale=Math.max(.25,Math.min((stage.clientWidth-100)/w,(stage.clientHeight-100)/h,1));$('#zoomLabel').textContent=Math.round(scale*100)+'%';render();applyPan()};
 renderLibrary();render();
 window.PANEL_STUDIO_APPLY_SHARED_LIBRARY=()=>{
-  libraryCategories=window.PANEL_STUDIO_LIBRARY_DATA?.categories||[];
-  backplaneParts=mergeSavedParts(backplaneParts);
-  lidParts=mergeSavedParts(lidParts);
-  parts=editorView==='lid'?lidParts:backplaneParts;
+  syncSharedLibraryForCurrentSide();
   if(selectedLibraryId&&!parts.some(part=>part.id===selectedLibraryId))selectedLibraryId=null;
   renderLibrary();render();
 };

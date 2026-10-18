@@ -18,7 +18,7 @@
     backdrop.hidden = true;
     backdrop.innerHTML = `
       <section class="library-admin-dialog" role="dialog" aria-modal="true" aria-labelledby="libraryAdminTitle" tabindex="-1">
-        <header class="library-admin-heading"><div><span class="library-admin-eyebrow">ADMINISTRAÇÃO</span><h2 id="libraryAdminTitle">Biblioteca de componentes</h2><p>Organize categorias e componentes compartilhados com todos os perfis.</p></div><button class="library-admin-close" type="button" aria-label="Fechar">×</button></header>
+        <header class="library-admin-heading"><div><span class="library-admin-eyebrow">ADMINISTRAÇÃO</span><h2 id="libraryAdminTitle">Biblioteca de componentes</h2><p>Organize categorias e componentes compartilhados com todos os perfis.</p></div><div class="library-admin-heading-actions"><div class="library-admin-side-switch" role="group" aria-label="Biblioteca a editar"><button type="button" data-library-side="back" class="is-active" aria-pressed="true">Fundo</button><button type="button" data-library-side="lid" aria-pressed="false">Tampa</button></div><button class="library-admin-close" type="button" aria-label="Fechar">×</button></div></header>
         <div class="library-admin-body">
           <aside class="library-admin-categories"><div class="library-admin-section-heading"><strong>Categorias</strong><button class="btn" type="button" data-action="add-category">＋ Categoria</button></div><button class="btn library-admin-add-sub" type="button" data-action="add-subcategory">＋ Subcategoria</button><form class="library-admin-category-form" hidden><strong data-category-form-title>Nova categoria</strong><label>Nome da categoria<input name="name" required maxlength="80" placeholder="Ex.: Proteção"></label><input name="id" type="hidden"><input name="parentId" type="hidden"><input name="sortOrder" type="hidden"><div class="library-admin-form-actions"><button class="btn" type="button" data-action="cancel-category">Cancelar</button><button class="btn primary" type="submit">Salvar categoria</button></div></form><div class="library-admin-category-list"></div><p class="library-admin-note">Selecione uma categoria para listar seus componentes. Use ↑ e ↓ para ordenar.</p></aside>
           <section class="library-admin-components"><div class="library-admin-section-heading"><strong class="library-admin-current-category">Componentes</strong><button class="btn primary" data-action="new-component">＋ Componente</button></div><div class="library-admin-component-list"></div><form class="library-admin-form" hidden>
@@ -41,6 +41,9 @@
     const status = backdrop.querySelector('.library-admin-status');
     let categories = [];
     let components = [];
+    let allCategories = [];
+    let allComponents = [];
+    let activeSide = document.getElementById('viewLid')?.getAttribute('aria-pressed') === 'true' ? 'lid' : 'back';
     let selectedCategoryId = null;
     let editingId = null;
     let editingCategoryId = null;
@@ -50,14 +53,25 @@
       status.hidden = !message;
       status.classList.toggle('is-error', isError);
     };
-    const updateApp = () => onChange({ categories, components });
+    const updateApp = () => onChange({ categories: allCategories, components: allComponents });
+    const applySide = () => {
+      categories = sortRows(allCategories.filter((row) => (row.side || 'back') === activeSide));
+      const ids = new Set(categories.map((row) => row.id));
+      components = sortRows(allComponents.filter((row) => ids.has(row.category_id)));
+      if (!categories.some((row) => row.id === selectedCategoryId)) selectedCategoryId = categories[0]?.id || null;
+      for (const button of backdrop.querySelectorAll('[data-library-side]')) {
+        const selected = button.dataset.librarySide === activeSide;
+        button.classList.toggle('is-active', selected);
+        button.setAttribute('aria-pressed', String(selected));
+      }
+    };
     const refresh = async () => {
       setStatus('Carregando biblioteca…');
       try {
         const data = await api.load();
-        categories = sortRows(data.categories || []);
-        components = sortRows(data.components || []);
-        if (!categories.some((row) => row.id === selectedCategoryId)) selectedCategoryId = categories[0]?.id || null;
+        allCategories = sortRows(data.categories || []);
+        allComponents = sortRows(data.components || []);
+        applySide();
         render();
         updateApp();
         setStatus('');
@@ -134,6 +148,15 @@
     };
     const close = () => { backdrop.hidden = true; trigger.focus(); };
     trigger.addEventListener('click', () => { backdrop.hidden = false; dialog.focus(); void refresh(); });
+    backdrop.querySelectorAll('[data-library-side]').forEach((button) => button.addEventListener('click', () => {
+      const nextSide = button.dataset.librarySide;
+      if (nextSide === activeSide) return;
+      activeSide = nextSide;
+      selectedCategoryId = null;
+      categoryForm.reset(); editingCategoryId = null; categoryForm.hidden = true;
+      form.reset(); editingId = null; form.hidden = true; componentList.hidden = false;
+      applySide(); render(); setStatus('');
+    }));
     backdrop.querySelector('.library-admin-close').addEventListener('click', close);
     backdrop.addEventListener('click', (event) => { if (event.target === backdrop) close(); });
     dialog.addEventListener('keydown', (event) => { if (event.key === 'Escape') close(); });
@@ -211,7 +234,7 @@
       if (!name) return;
       const wasEditing = Boolean(editingCategoryId);
       const id = editingCategoryId || `cat-${crypto.randomUUID()}`;
-      const category = { id, name, parent_id: categoryForm.elements.parentId.value || null, sort_order: Number(categoryForm.elements.sortOrder.value) || 0 };
+      const category = { id, name, side: activeSide, parent_id: categoryForm.elements.parentId.value || null, sort_order: Number(categoryForm.elements.sortOrder.value) || 0 };
       setStatus('Salvando categoria…');
       try {
         await api.saveCategory(category);
