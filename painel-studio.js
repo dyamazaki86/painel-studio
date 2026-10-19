@@ -612,7 +612,7 @@ function renderProps() {
     $('#properties').innerHTML=`<div class="section"><div class="props-title">Trilho DIN 35 mm</div>
       <div class="item-sub" style="margin-top:4px">${p.locked?'🔒 Trilho travado. Destrave para alterar.':'Arraste o trilho para mover; use as alças azuis nas pontas para redimensionar.'}</div>
       <div class="field-row"><div class="field"><div class="field-label">Comprimento</div><input id="railLength" type="number" min="70" value="${length}"><span class="unit">mm</span></div>
-      <div class="field"><div class="field-label">Largura</div><input type="number" value="35" readonly aria-label="Largura fixa do trilho DIN"><span class="unit">mm</span></div></div>
+      <div class="field"><div class="field-label">Largura</div><input class="property-readonly" type="number" value="35" readonly aria-label="Largura fixa do trilho DIN"><span class="unit">mm</span></div></div>
       <div class="field-row"><div class="field"><div class="field-label">Posição X</div><input id="railX" type="number" value="${Math.round(p.x??35)}"><span class="unit">mm</span></div>
       <div class="field"><div class="field-label">Posição Y</div><input id="railY" type="number" value="${Math.round(p.y)}"><span class="unit">mm</span></div></div>
       <div class="mini-actions"><button class="btn" id="toggleLock">${p.locked?'🔓 Destravar trilho':'🔒 Travar trilho'}</button></div>
@@ -622,21 +622,16 @@ function renderProps() {
     $('#railY').onchange=e=>{p.y=Math.max(0,Math.min(h,+e.target.value||0));markDirty();render()};
     $('#propDelete').onclick=removeSelected;bindLockControls(p);return;
   }
-  $('#properties').innerHTML=`<div class="section"><div class="props-title">${escapeHTML(p.name)}</div><div class="field-label">Nome</div><input id="componentName" class="select" type="text" value="${escapeHTML(p.name)}"><div class="item-sub" style="margin-top:4px">${p.channelProfile ? `${p.cat} · seção ${p.fixedSection} mm` : `${p.cat} · ${p.w} × ${p.h} mm`}</div>${p.locked?'<div class="item-sub" style="margin-top:6px">🔒 Componente travado. Destrave para alterar.</div>':''}
+  $('#properties').innerHTML=`<div class="section"><div class="props-title">${escapeHTML(p.name)}</div><div class="field-label">Nome</div><input id="componentName" class="select property-readonly" type="text" value="${escapeHTML(p.name)}" readonly aria-label="Nome do componente"><div class="item-sub" style="margin-top:4px">${p.channelProfile ? `${p.cat} · seção ${p.fixedSection} mm` : `${p.cat} · ${p.w} × ${p.h} mm`}</div>${p.locked?'<div class="item-sub" style="margin-top:6px">🔒 Componente travado. Destrave para alterar.</div>':''}
     ${categorySelect(p.cat)}
     <div class="field-row"><div class="field"><div class="field-label">Posição X</div><input id="posX" type="number" value="${Math.round(p.x)}"></div><div class="field"><div class="field-label">Posição Y</div><input id="posY" type="number" value="${Math.round(p.y)}"></div></div>
-    ${p.channelProfile ? `<div class="field-label">Comprimento</div><div class="field"><input id="partW" type="number" min="10" value="${p.w}"><span class="unit">mm</span></div><div class="item-sub" style="margin-top:6px">Seção fixa: ${p.fixedSection} mm. Arraste a alça na extremidade para ajustar o comprimento.</div>` : `<div class="field-row"><div class="field"><div class="field-label">Largura</div><input id="partW" type="number" min="1" value="${p.w}"><span class="unit">mm</span></div><div class="field"><div class="field-label">Altura</div><input id="partH" type="number" min="1" value="${p.h}"><span class="unit">mm</span></div></div>${p.resizable ? '<div class="item-sub" style="margin-top:6px">Use os campos ou arraste a alça azul para redimensionar.</div>' : ''}`}
-    <div class="field-label">Imagem do componente</div><input id="partImage" type="file" accept="image/*" class="select"><div class="item-sub" style="margin-top:5px">O arquivo selecionado será salvo em assets/components e associado ao componente.</div>
+    ${p.channelProfile ? `<div class="field-label">Comprimento</div><div class="field"><input id="partW" type="number" min="10" value="${p.w}"><span class="unit">mm</span></div><div class="item-sub" style="margin-top:6px">Seção fixa: ${p.fixedSection} mm. Arraste a alça na extremidade para ajustar o comprimento.</div>` : `<div class="field-row"><div class="field"><div class="field-label">Largura</div><input id="partW" class="property-readonly" type="number" value="${p.w}" readonly aria-label="Largura do componente"><span class="unit">mm</span></div><div class="field"><div class="field-label">Altura</div><input id="partH" class="property-readonly" type="number" value="${p.h}" readonly aria-label="Altura do componente"><span class="unit">mm</span></div></div>`}
     ${p.image ? `<div class="field-label">Ajuste da imagem</div><select id="imageFit" class="select"><option value="cover" ${(p.imageFit||'cover')==='cover'?'selected':''}>Preencher área (cortar bordas)</option><option value="contain" ${p.imageFit==='contain'?'selected':''}>Mostrar imagem inteira</option></select>` : ''}
     <div class="mini-actions"><button class="btn" id="toggleLock">${p.locked?'🔓 Destravar componente':'🔒 Travar componente'}</button></div>
     <div class="mini-actions"><button class="btn" id="propRotate"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 7v5h-5"/><path d="M20 12a8 8 0 1 1-2.34-5.66L20 12"/></svg> Girar 90°</button><button class="btn" id="propDelete"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6M10 11v5M14 11v5"/></svg> Excluir</button></div></div>`;
   $('#posX').onchange=e=>{const x=+e.target.value;if(canOccupy(p,x,p.y)){p.x=x;markDirty()}else toast('Posição não permitida: sobreposição.');render()}; $('#posY').onchange=e=>{const y=+e.target.value;if(canOccupy(p,p.x,y)){p.y=y;markDirty()}else toast('Posição não permitida: sobreposição.');render()};
-  $('#componentName').onchange=e=>{p.name=e.target.value.trim()||p.name;markDirty();render()};
   $('#componentCategory').onchange=e=>{p.cat=e.target.value;markDirty();render()};
-  prepareImageUploadPicker($('#partImage'));
-  $('#partImage').onchange=e=>{const file=e.target.files?.[0];if(!file)return;saveComponentImage(file,p).then(()=>render())};
-  $('#partW').onchange=e=>{const w=Math.max(p.channelProfile?10:1,+e.target.value||1),h=p.channelProfile?p.fixedSection:p.h;if(canOccupy(p,p.x,p.y,w,h)){p.w=w;p.h=h;markDirty()}else toast('Dimensão não permitida: sobreposição.');render()};
-  if ($('#partH')) $('#partH').onchange=e=>{const h=Math.max(1,+e.target.value||1);if(canOccupy(p,p.x,p.y,p.w,h)){p.h=h;markDirty()}else toast('Dimensão não permitida: sobreposição.');render()};
+  if (p.channelProfile) $('#partW').onchange=e=>{const w=Math.max(10,+e.target.value||10),h=p.fixedSection;if(canOccupy(p,p.x,p.y,w,h)){p.w=w;p.h=h;markDirty()}else toast('Dimensão não permitida: sobreposição.');render()};
   if ($('#imageFit')) $('#imageFit').onchange=e=>{p.imageFit=e.target.value;markDirty();render()};
   $('#propRotate').onclick=rotate;
   $('#propDelete').onclick=removeSelected;
@@ -723,7 +718,7 @@ function decorateRulers() {
   left.style.top=`${origin*scale}px`;left.style.height=`${innerH}px`;left.innerHTML=build('y',endY);
 }
 function decorateChannel() {
-  const p=placed.find(x=>x.id===selected&&x.resizable);if(!p)return;
+  const p=placed.find(x=>x.id===selected&&x.channelProfile);if(!p)return;
   const g=[...svg.children].find(el=>el.localName==='g'&&el.getAttribute('transform')===`translate(${p.x},${p.y})`);if(!g)return;
   const size=partSize(p),handle=document.createElementNS('http://www.w3.org/2000/svg','rect');handle.setAttribute('class','channel-resize');
   handle.setAttribute('x',p.channelProfile&&p.rot?size.w/2-5:size.w-5);handle.setAttribute('y',p.channelProfile?(p.rot?size.h-5:size.h/2-5):size.h-5);handle.setAttribute('width',10);handle.setAttribute('height',10);handle.setAttribute('fill','#4263eb');handle.style.cursor=p.channelProfile?(p.rot?'ns-resize':'ew-resize'):'nwse-resize';g.append(handle);
@@ -782,7 +777,7 @@ svg.addEventListener('pointerdown',e=>{
   if(e.target.closest('[data-rail-id]'))return;
   const channelHandle=e.target.classList.contains('channel-resize');if(!channelHandle)return;
   e.stopImmediatePropagation();e.preventDefault();
-  const resizeGroup=e.target.closest('g[transform]'),resizeTransform=(resizeGroup?.getAttribute('transform')||'').match(/translate\(([^,]+),([^\)]+)\)/),resized=placed.find(x=>x.resizable&&resizeTransform&&x.x==resizeTransform[1]&&x.y==resizeTransform[2]);
+  const resizeGroup=e.target.closest('g[transform]'),resizeTransform=(resizeGroup?.getAttribute('transform')||'').match(/translate\(([^,]+),([^\)]+)\)/),resized=placed.find(x=>x.channelProfile&&resizeTransform&&x.x==resizeTransform[1]&&x.y==resizeTransform[2]);
   if(!resized)return;
   if(resized.locked){selectedIds=new Set([resized.id]);selected=resized.id;selectedLibraryId=null;customDrag=null;render();toast('Destrave o componente para alterá-lo.');return}
   historyActionOpen=true;historyActionRecorded=false;selectedIds=new Set([resized.id]);selected=resized.id;
@@ -891,7 +886,6 @@ function updateLibraryDragPreview(event){
 $('#stage').addEventListener('dragover',updateLibraryDragPreview,true);
 $('#stage').addEventListener('dragleave',e=>{if(!e.relatedTarget||!e.currentTarget.contains(e.relatedTarget))clearLibraryDragPreview()},true);
 $('#stage').addEventListener('drop',e=>{const id=e.dataTransfer.getData('part')||e.dataTransfer.getData('text/plain')||libraryDragId;if(!id)return;e.preventDefault();e.stopImmediatePropagation();clearLibraryDragPreview();libraryDragId=null;const rect=svg.getBoundingClientRect(),{w,h}=panel();addPartAtPointer(id,(e.clientX-rect.left)/rect.width*w,(e.clientY-rect.top)/rect.height*h)},true);
-$('#createPart').onclick=()=>{const name=$('#mName').value.trim()||'Novo componente',cat=$('#mCat').value,p={id:'lib'+Date.now(),name,cat,w:+$('#mW').value||30,h:+$('#mH').value||50,color:['#ed956e','#5aa8d8','#a482d6','#55b89a'][parts.length%4],icon:'▦',resizable:name.toLowerCase().includes('canaleta')};parts.push(p);$('#modalBack').style.display='none';$('#mName').value='';selectedLibraryId=p.id;selected=null;selectedIds.clear();markDirty();renderLibrary();renderProps()};
 const stage=$('#stage');
 function svgPointFromEvent(e){const point=svg.createSVGPoint();point.x=e.clientX;point.y=e.clientY;const matrix=svg.getScreenCTM();return matrix?point.matrixTransform(matrix.inverse()):{x:0,y:0}}
 svg.addEventListener('pointerdown',e=>{
