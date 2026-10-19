@@ -525,7 +525,7 @@ function initializePanelStudioAuth() {
       await loadAndCacheProjects(user, keys);
       studioShell.hidden = false;
       await loadScript('assets/profile-storage.js');
-      await loadScript('assets/library-admin.js');
+      await loadScript('assets/library-admin.js?v=0.3.10');
       await loadScript('assets/app.js?v=0.3.9');
       await loadScript('painel-studio.js?v=0.3.9');
       addProfileControls(user);

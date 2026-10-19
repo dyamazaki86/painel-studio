@@ -24,7 +24,7 @@
           <section class="library-admin-components"><div class="library-admin-section-heading"><strong class="library-admin-current-category">Componentes</strong><button class="btn primary" data-action="new-component">＋ Componente</button></div><div class="library-admin-component-list"></div><form class="library-admin-form" hidden>
             <div class="library-admin-form-heading"><strong data-form-title>Novo componente</strong><button class="btn icon" type="button" data-action="cancel-edit" aria-label="Fechar edição">×</button></div>
             <input type="hidden" name="id"><label>Nome<input name="name" required maxlength="120" placeholder="Ex.: Disjuntor WEG MDW"></label>
-            <div class="library-admin-form-row"><label>Categoria<select name="categoryId" required></select></label><label>Ícone<input name="icon" maxlength="8" value="▦"></label></div>
+            <div class="library-admin-form-row"><label>Categoria<select name="categoryId" required></select></label><label>Ícone<input name="icon" maxlength="8" value="▦"></label><label>Formato<select name="shape"><option value="rect">Retangular</option><option value="circle">Circular</option></select></label></div>
             <div class="library-admin-form-row"><label>Largura (mm)<input name="w" type="number" min="1" max="3000" step="0.1" required></label><label>Altura (mm)<input name="h" type="number" min="1" max="3000" step="0.1" required></label><label>Cor<input name="color" type="color" value="#5aa8d8"></label></div>
             <label>Imagem do componente<input name="imageFile" type="file" accept="image/png,image/jpeg,image/webp"><small>PNG, JPG ou WebP. A imagem ficará compartilhada na biblioteca.</small></label><div class="library-admin-image-preview"></div><label class="library-admin-remove-image" hidden><input name="removeImage" type="checkbox"> Remover a imagem atual ao salvar</label>
             <div class="library-admin-form-actions"><button class="btn" type="button" data-action="cancel-edit">Cancelar</button><button class="btn primary" type="submit">Salvar componente</button></div>
@@ -101,7 +101,7 @@
       form.elements.categoryId.innerHTML = choices;
       const entries = components.filter((item) => !selectedCategoryId || item.category_id === selectedCategoryId);
       componentList.innerHTML = entries.length ? entries.map((item, index) => `
-        <article class="library-admin-component-row"><div class="library-admin-component-thumb">${item.image ? `<img src="${escapeHtml(item.image)}" alt="">` : `<span>${escapeHtml(item.icon || '▦')}</span>`}</div><div class="library-admin-component-info"><strong>${escapeHtml(item.name)}</strong><span>${item.width_mm} × ${item.height_mm} mm</span></div><div class="library-admin-row-actions"><button type="button" data-component-move="up" data-id="${escapeHtml(item.id)}" title="Mover para cima" aria-label="Mover ${escapeHtml(item.name)} para cima">↑</button><button type="button" data-component-move="down" data-id="${escapeHtml(item.id)}" title="Mover para baixo" aria-label="Mover ${escapeHtml(item.name)} para baixo">↓</button><button type="button" data-component-edit="${escapeHtml(item.id)}" title="Editar componente" aria-label="Editar ${escapeHtml(item.name)}">Editar</button><button type="button" class="is-danger" data-component-delete="${escapeHtml(item.id)}" aria-label="Excluir ${escapeHtml(item.name)}">${'<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6M10 11v5M14 11v5"/></svg>'}</button></div></article>`).join('') : '<div class="library-admin-empty">Nenhum componente nesta categoria.</div>';
+        <article class="library-admin-component-row"><div class="library-admin-component-thumb">${item.image ? `<img src="${escapeHtml(item.image)}" alt="">` : `<span>${escapeHtml(item.icon || '▦')}</span>`}</div><div class="library-admin-component-info"><strong>${escapeHtml(item.name)}</strong><span>${item.width_mm} × ${item.height_mm} mm</span></div><div class="library-admin-row-actions"><button type="button" data-component-move="up" data-id="${escapeHtml(item.id)}" title="Mover para cima" aria-label="Mover ${escapeHtml(item.name)} para cima">↑</button><button type="button" data-component-move="down" data-id="${escapeHtml(item.id)}" title="Mover para baixo" aria-label="Mover ${escapeHtml(item.name)} para baixo">↓</button><button type="button" data-component-duplicate="${escapeHtml(item.id)}" title="Duplicar componente" aria-label="Duplicar ${escapeHtml(item.name)}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 8V4h12v12h-4M4 8h12v12H4z"/></svg></button><button type="button" data-component-edit="${escapeHtml(item.id)}" title="Editar componente" aria-label="Editar ${escapeHtml(item.name)}">Editar</button><button type="button" class="is-danger" data-component-delete="${escapeHtml(item.id)}" aria-label="Excluir ${escapeHtml(item.name)}">${'<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6M10 11v5M14 11v5"/></svg>'}</button></div></article>`).join('') : '<div class="library-admin-empty">Nenhum componente nesta categoria.</div>';
       backdrop.querySelector('[data-action="add-subcategory"]').disabled = !selectedCategoryId || Boolean(selectedCategory?.parent_id);
     };
     const showForm = (component = null) => {
@@ -113,6 +113,7 @@
       form.elements.name.value = component?.name || '';
       form.elements.categoryId.value = component?.category_id || selectedCategoryId || categories[0].id;
       form.elements.icon.value = component?.icon || '▦';
+      form.elements.shape.value = component?.metadata?.shape || component?.shape || 'rect';
       form.elements.w.value = component?.width_mm ?? 30;
       form.elements.h.value = component?.height_mm ?? 50;
       form.elements.color.value = component?.color || '#5aa8d8';
@@ -202,6 +203,26 @@
         const rows = sortRows(components.filter((item) => item.category_id === component.category_id));
         await moveInGroup(rows, component.id, move.dataset.componentMove, (row) => api.saveComponent(row)); return;
       }
+      const duplicateButton = event.target.closest('[data-component-duplicate]');
+      if (duplicateButton) {
+        const component = components.find((item) => item.id === duplicateButton.dataset.componentDuplicate);
+        if (!component) return;
+        const siblings = components.filter((item) => item.category_id === component.category_id);
+        const duplicate = {
+          ...component,
+          id: `part-${crypto.randomUUID()}`,
+          name: `${component.name} (cópia)`,
+          sort_order: Math.max(-1, ...siblings.map((item) => Number(item.sort_order) || 0)) + 1,
+          metadata: { ...(component.metadata || {}) }
+        };
+        setStatus('Duplicando componente…');
+        try {
+          await api.saveComponent(duplicate);
+          await refresh();
+          toast('Componente duplicado');
+        } catch (error) { setStatus(`Não foi possível duplicar o componente. ${error.message}`, true); }
+        return;
+      }
       const remove = event.target.closest('[data-component-delete]');
       if (remove) {
         const component = components.find((item) => item.id === remove.dataset.componentDelete);
@@ -216,7 +237,7 @@
       const id = editingId || `part-${crypto.randomUUID()}`;
       const old = components.find((item) => item.id === id);
       const removeImage = data.get('removeImage') === 'on';
-      const row = { id, name: String(data.get('name')).trim(), category_id: String(data.get('categoryId')), width_mm: Number(data.get('w')), height_mm: Number(data.get('h')), color: String(data.get('color')), icon: String(data.get('icon') || '▦').trim(), image: removeImage ? null : old?.image || null, storage_path: removeImage ? null : old?.storage_path || null, sort_order: old?.sort_order ?? components.filter((item) => item.category_id === String(data.get('categoryId'))).length, metadata: old?.metadata || {} };
+      const row = { id, name: String(data.get('name')).trim(), category_id: String(data.get('categoryId')), width_mm: Number(data.get('w')), height_mm: Number(data.get('h')), color: String(data.get('color')), icon: String(data.get('icon') || '▦').trim(), image: removeImage ? null : old?.image || null, storage_path: removeImage ? null : old?.storage_path || null, sort_order: old?.sort_order ?? components.filter((item) => item.category_id === String(data.get('categoryId'))).length, metadata: { ...(old?.metadata || {}), shape: String(data.get('shape') || 'rect') } };
       const file = data.get('imageFile');
       if (!row.name || !row.category_id || !(row.width_mm > 0 && row.height_mm > 0)) return setStatus('Informe nome, categoria e dimensões válidas.', true);
       setStatus('Salvando componente…');
@@ -249,3 +270,4 @@
     });
   };
 })();
+
