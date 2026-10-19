@@ -593,10 +593,6 @@ $('#duplicateBtn').addEventListener('click',e=>{
 
 function renderProps() {
   const escapeHTML = value => String(value).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-  const categorySelect = current => {
-    const categories = [...new Set(['Proteção','Comando','Bornes','Canaletas','Outros', ...parts.map(x => x.cat), current])].filter(Boolean);
-    return `<div class="field-label">Categoria</div><select id="componentCategory" class="select">${categories.map(cat => `<option value="${escapeHTML(cat)}" ${cat === current ? 'selected' : ''}>${escapeHTML(cat)}</option>`).join('')}</select>`;
-  };
   const p = placed.find(x => x.id === selected);
   if (!p && selectedLibraryId) {
     const lib = parts.find(x => x.id === selectedLibraryId);
@@ -622,17 +618,13 @@ function renderProps() {
     $('#railY').onchange=e=>{p.y=Math.max(0,Math.min(h,+e.target.value||0));markDirty();render()};
     $('#propDelete').onclick=removeSelected;bindLockControls(p);return;
   }
-  $('#properties').innerHTML=`<div class="section"><div class="props-title">${escapeHTML(p.name)}</div><div class="field-label">Nome</div><input id="componentName" class="select property-readonly" type="text" value="${escapeHTML(p.name)}" readonly aria-label="Nome do componente"><div class="item-sub" style="margin-top:4px">${p.channelProfile ? `${p.cat} · seção ${p.fixedSection} mm` : `${p.cat} · ${p.w} × ${p.h} mm`}</div>${p.locked?'<div class="item-sub" style="margin-top:6px">🔒 Componente travado. Destrave para alterar.</div>':''}
-    ${categorySelect(p.cat)}
+  $('#properties').innerHTML=`<div class="section"><div class="field-label">Nome</div><input id="componentName" class="select property-readonly" type="text" value="${escapeHTML(p.name)}" readonly aria-label="Nome do componente">
     <div class="field-row"><div class="field"><div class="field-label">Posição X</div><input id="posX" type="number" value="${Math.round(p.x)}"></div><div class="field"><div class="field-label">Posição Y</div><input id="posY" type="number" value="${Math.round(p.y)}"></div></div>
-    ${p.channelProfile ? `<div class="field-label">Comprimento</div><div class="field"><input id="partW" type="number" min="10" value="${p.w}"><span class="unit">mm</span></div><div class="item-sub" style="margin-top:6px">Seção fixa: ${p.fixedSection} mm. Arraste a alça na extremidade para ajustar o comprimento.</div>` : `<div class="field-row"><div class="field"><div class="field-label">Largura</div><input id="partW" class="property-readonly" type="number" value="${p.w}" readonly aria-label="Largura do componente"><span class="unit">mm</span></div><div class="field"><div class="field-label">Altura</div><input id="partH" class="property-readonly" type="number" value="${p.h}" readonly aria-label="Altura do componente"><span class="unit">mm</span></div></div>`}
-    ${p.image ? `<div class="field-label">Ajuste da imagem</div><select id="imageFit" class="select"><option value="cover" ${(p.imageFit||'cover')==='cover'?'selected':''}>Preencher área (cortar bordas)</option><option value="contain" ${p.imageFit==='contain'?'selected':''}>Mostrar imagem inteira</option></select>` : ''}
+    <div class="field-row"><div class="field"><div class="field-label">Largura</div><input id="partW" class="${p.channelProfile?'':'property-readonly'}" type="number" value="${p.w}" ${p.channelProfile?'min="10"':'readonly aria-label="Largura do componente"'}><span class="unit">mm</span></div><div class="field"><div class="field-label">Altura</div><input id="partH" class="property-readonly" type="number" value="${p.channelProfile?p.fixedSection:p.h}" readonly aria-label="Altura do componente"><span class="unit">mm</span></div></div>
     <div class="mini-actions"><button class="btn" id="toggleLock">${p.locked?'🔓 Destravar componente':'🔒 Travar componente'}</button></div>
     <div class="mini-actions"><button class="btn" id="propRotate"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 7v5h-5"/><path d="M20 12a8 8 0 1 1-2.34-5.66L20 12"/></svg> Girar 90°</button><button class="btn" id="propDelete"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6M10 11v5M14 11v5"/></svg> Excluir</button></div></div>`;
   $('#posX').onchange=e=>{const x=+e.target.value;if(canOccupy(p,x,p.y)){p.x=x;markDirty()}else toast('Posição não permitida: sobreposição.');render()}; $('#posY').onchange=e=>{const y=+e.target.value;if(canOccupy(p,p.x,y)){p.y=y;markDirty()}else toast('Posição não permitida: sobreposição.');render()};
-  $('#componentCategory').onchange=e=>{p.cat=e.target.value;markDirty();render()};
   if (p.channelProfile) $('#partW').onchange=e=>{const w=Math.max(10,+e.target.value||10),h=p.fixedSection;if(canOccupy(p,p.x,p.y,w,h)){p.w=w;p.h=h;markDirty()}else toast('Dimensão não permitida: sobreposição.');render()};
-  if ($('#imageFit')) $('#imageFit').onchange=e=>{p.imageFit=e.target.value;markDirty();render()};
   $('#propRotate').onclick=rotate;
   $('#propDelete').onclick=removeSelected;
   bindLockControls(p);
@@ -910,6 +902,7 @@ window.PANEL_STUDIO_APPLY_SHARED_LIBRARY=()=>{
   if(selectedLibraryId&&!parts.some(part=>part.id===selectedLibraryId))selectedLibraryId=null;
   renderLibrary();render();
 };
+
 
 
 
