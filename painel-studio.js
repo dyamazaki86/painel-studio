@@ -155,7 +155,7 @@ const defaultLidParts=[
   {id:'lid-pilot-green',name:'Sinalizador verde Ø22 mm',cat:'Sinalizadores',w:22,h:22,color:'#39ae79',icon:'',shape:'circle'},
   {id:'lid-pilot-red',name:'Sinalizador vermelho Ø22 mm',cat:'Sinalizadores',w:22,h:22,color:'#db5360',icon:'',shape:'circle'},
   {id:'lid-pilot-yellow',name:'Sinalizador amarelo Ø22 mm',cat:'Sinalizadores',w:22,h:22,color:'#e8b73b',icon:'',shape:'circle'},
-  {id:'lid-id-plate',name:'Placa de identificação 60 × 20 mm',cat:'Identificação',w:60,h:20,color:'#e7ebf1',icon:'ID'}
+  {id:'lid-id-plate',name:'Placa de identificação 60 × 20 mm',cat:'Identificação',w:60,h:20,color:'#e7ebf1',icon:'',textBox:true,text:'Identificação',textColor:'#243247',fontFamily:'Arial',fontSizePt:9,bold:false,italic:false,textAlign:'center'}
 ];
 function mergeLidParts(saved=[],catalog=(window.PANEL_STUDIO_LIBRARY_DATA?.components||[]).filter(part=>part.side==='lid'),sharedConfigured=window.PANEL_STUDIO_LIBRARY_DATA?.sidesEnabled===true){const list=Array.isArray(saved)?saved:[];if(sharedConfigured)return catalog.map(part=>({...part}));const byId=new Map(list.map(part=>[part.id,part])),known=new Set(defaultLidParts.map(part=>part.id));return [...defaultLidParts.map(part=>({...part,...(byId.get(part.id)||{})})),...list.filter(part=>!known.has(part.id))]}
 let editorView='back',backplaneParts=parts,backplanePlaced=placed;
@@ -179,12 +179,29 @@ window.render = function renderOverride() {
   decorateRails();
   decorateImages();
   decorateChannel();
+  decorateTextBoxes();
   decorateAnchors();
   decorateRulers();
   decorateLocks();
   svg.querySelectorAll('g.part[data-id]').forEach(group=>{if(selectedIds.has(group.dataset.id))group.classList.add('selected')});
   if(selectedIds.size>1){const note=document.createElement('div');note.className='item-sub';note.style.cssText='padding:8px 17px 0;font-weight:600';note.textContent=`${selectedIds.size} componentes selecionados · Ctrl+clique para ajustar a seleção`;$('#properties').prepend(note)}
 };
+function isTextBoxComponent(part){return part?.textBox===true||part?.id==='lid-id-plate'||/placa de identifica[çc][ãa]o/i.test(part?.name||'')}
+function decorateTextBoxes(){
+  for(const group of svg.querySelectorAll('g.part[data-id]')){
+    const part=placed.find(item=>item.id===group.dataset.id);if(!isTextBoxComponent(part))continue;
+    const outline=group.querySelector('.outline');if(!outline)continue;
+    const width=part.rot?part.h:part.w,height=part.rot?part.w:part.h;
+    outline.setAttribute('fill',part.color||'#e7ebf1');outline.setAttribute('stroke','#586579');outline.setAttribute('stroke-width',String(1/scale));outline.setAttribute('opacity','1');outline.setAttribute('rx','2');
+    group.querySelectorAll(':scope > rect:not(.outline),:scope > text,:scope > image,:scope > defs').forEach(node=>node.remove());
+    const lines=String(part.text??'Identificação').split(/\r?\n/),fontSize=Math.max(1,Number(part.fontSizePt)||9)*25.4/72,lineHeight=fontSize*1.2,clipId=`plate-clip-${String(part.id).replace(/[^a-zA-Z0-9_-]/g,'')}`;
+    let defs=svg.querySelector('defs');if(!defs){defs=svgEl('defs',{});svg.prepend(defs)}
+    const clip=svgEl('clipPath',{id:clipId,clipPathUnits:'userSpaceOnUse'});clip.append(svgEl('rect',{x:2,y:2,width:Math.max(0,width-4),height:Math.max(0,height-4),rx:1}));defs.append(clip);
+    const text=svgEl('text',{x:width/2,y:(height-(lines.length-1)*lineHeight)/2+fontSize*.34,'text-anchor':part.textAlign||'center','font-size':fontSize,'font-family':part.fontFamily||'Arial',fill:part.textColor||'#243247','font-weight':part.bold?'700':'400','font-style':part.italic?'italic':'normal','clip-path':`url(#${clipId})`,'pointer-events':'none'});
+    lines.forEach((line,index)=>{const span=svgEl('tspan',{x:part.textAlign==='left'?3:part.textAlign==='right'?width-3:width/2,dy:index===0?0:lineHeight});span.textContent=line;text.append(span)});
+    group.append(text);
+  }
+}
 function syncPanelColorPalette(){document.querySelectorAll('#panelColorPalette [data-panel-color]').forEach(button=>button.setAttribute('aria-pressed',button.dataset.panelColor===(panelColor||'')?'true':'false'))}
 document.addEventListener('keydown', e => {
   const typing=e.target instanceof HTMLElement&&e.target.matches('input,textarea,select,[contenteditable="true"]');
@@ -618,17 +635,36 @@ function renderProps() {
     $('#railY').onchange=e=>{p.y=Math.max(0,Math.min(h,+e.target.value||0));markDirty();render()};
     $('#propDelete').onclick=removeSelected;bindLockControls(p);return;
   }
+  const textBox=isTextBoxComponent(p),safeColor=value=>/^#[0-9a-f]{6}$/i.test(value||'')?value:'#e7ebf1',safeTextColor=value=>/^#[0-9a-f]{6}$/i.test(value||'')?value:'#243247';
   $('#properties').innerHTML=`<div class="section"><div class="field-label">Nome</div><input id="componentName" class="select property-readonly" type="text" value="${escapeHTML(p.name)}" readonly aria-label="Nome do componente">
     <div class="field-row"><div class="field"><div class="field-label">Posição X</div><input id="posX" type="number" value="${Math.round(p.x)}"></div><div class="field"><div class="field-label">Posição Y</div><input id="posY" type="number" value="${Math.round(p.y)}"></div></div>
-    <div class="field-row"><div class="field"><div class="field-label">Largura</div><input id="partW" class="${p.channelProfile?'':'property-readonly'}" type="number" value="${p.w}" ${p.channelProfile?'min="10"':'readonly aria-label="Largura do componente"'}><span class="unit">mm</span></div><div class="field"><div class="field-label">Altura</div><input id="partH" class="property-readonly" type="number" value="${p.channelProfile?p.fixedSection:p.h}" readonly aria-label="Altura do componente"><span class="unit">mm</span></div></div>
+    <div class="field-row"><div class="field"><div class="field-label">Largura</div><input id="partW" class="${p.channelProfile||textBox?'':'property-readonly'}" type="number" value="${p.w}" ${p.channelProfile||textBox?'min="10"':'readonly aria-label="Largura do componente"'}><span class="unit">mm</span></div><div class="field"><div class="field-label">Altura</div><input id="partH" class="${textBox?'':'property-readonly'}" type="number" value="${p.channelProfile?p.fixedSection:p.h}" ${textBox?'min="5"':'readonly aria-label="Altura do componente"'}><span class="unit">mm</span></div></div>
+    ${textBox?`<div class="field-label">Texto da placa</div><textarea id="plateText" class="select plate-text" rows="3" maxlength="180">${escapeHTML(p.text??'Identificação')}</textarea>
+      <div class="field-row"><div class="field"><div class="field-label">Fundo</div><input id="plateBackground" class="color-field" type="color" value="${safeColor(p.color)}"></div><div class="field"><div class="field-label">Cor da fonte</div><input id="plateTextColor" class="color-field" type="color" value="${safeTextColor(p.textColor)}"></div></div>
+      <div class="field-label">Fonte</div><select id="plateFont" class="select"><option>Arial</option><option>Roboto</option><option>DM Sans</option><option>Inter</option><option>Verdana</option><option>Georgia</option><option>Times New Roman</option></select>
+      <div class="field-row"><div class="field"><div class="field-label">Tamanho da fonte</div><input id="plateFontSize" type="number" min="4" max="48" step="1" value="${Math.min(48,Math.max(4,Number(p.fontSizePt)||9))}"><span class="unit">pt</span></div><div class="field"><div class="field-label">Alinhamento</div><select id="plateAlign" class="select"><option value="left">Esquerda</option><option value="center">Centralizado</option><option value="right">Direita</option></select></div></div>
+      <div class="plate-style-row"><label><input id="plateBold" type="checkbox"> Negrito</label><label><input id="plateItalic" type="checkbox"> Itálico</label></div>`:''}
     <div class="mini-actions"><button class="btn" id="toggleLock">${p.locked?'🔓 Destravar componente':'🔒 Travar componente'}</button></div>
     <div class="mini-actions"><button class="btn" id="propRotate"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 7v5h-5"/><path d="M20 12a8 8 0 1 1-2.34-5.66L20 12"/></svg> Girar 90°</button><button class="btn" id="propDelete"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6M10 11v5M14 11v5"/></svg> Excluir</button></div></div>`;
+  if(textBox){$('#plateFont').value=p.fontFamily||'Arial';$('#plateAlign').value=p.textAlign||'center';$('#plateBold').checked=!!p.bold;$('#plateItalic').checked=!!p.italic;
+    $('#partW').onchange=e=>resizeTextBox(p,Math.max(10,+e.target.value||10),p.h);
+    $('#partH').onchange=e=>resizeTextBox(p,p.w,Math.max(5,+e.target.value||5));
+    $('#plateText').onchange=e=>{p.text=e.target.value;markDirty();render()};
+    $('#plateBackground').onchange=e=>{p.color=e.target.value;markDirty();render()};
+    $('#plateTextColor').onchange=e=>{p.textColor=e.target.value;markDirty();render()};
+    $('#plateFont').onchange=e=>{p.fontFamily=e.target.value;markDirty();render()};
+    $('#plateFontSize').onchange=e=>{p.fontSizePt=Math.max(4,Math.min(48,+e.target.value||9));markDirty();render()};
+    $('#plateAlign').onchange=e=>{p.textAlign=e.target.value;markDirty();render()};
+    $('#plateBold').onchange=e=>{p.bold=e.target.checked;markDirty();render()};
+    $('#plateItalic').onchange=e=>{p.italic=e.target.checked;markDirty();render()};
+  }
   $('#posX').onchange=e=>{const x=+e.target.value;if(canOccupy(p,x,p.y)){p.x=x;markDirty()}else toast('Posição não permitida: sobreposição.');render()}; $('#posY').onchange=e=>{const y=+e.target.value;if(canOccupy(p,p.x,y)){p.y=y;markDirty()}else toast('Posição não permitida: sobreposição.');render()};
   if (p.channelProfile) $('#partW').onchange=e=>{const w=Math.max(10,+e.target.value||10),h=p.fixedSection;if(canOccupy(p,p.x,p.y,w,h)){p.w=w;p.h=h;markDirty()}else toast('Dimensão não permitida: sobreposição.');render()};
   $('#propRotate').onclick=rotate;
   $('#propDelete').onclick=removeSelected;
   bindLockControls(p);
 }
+function resizeTextBox(part,width,height){if(canOccupy(part,part.x,part.y,width,height)){part.w=width;part.h=height;markDirty()}else toast('Dimensão não permitida: sobreposição.');render()}
 
 function bindLockControls(part){
   $('#toggleLock').onclick=()=>{part.locked=!part.locked;markDirty();render()};
