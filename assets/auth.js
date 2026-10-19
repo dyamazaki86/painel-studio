@@ -526,8 +526,8 @@ function initializePanelStudioAuth() {
       studioShell.hidden = false;
       await loadScript('assets/profile-storage.js');
       await loadScript('assets/library-admin.js');
-      await loadScript('assets/app.js');
-      await loadScript('painel-studio.js?v=0.3.7');
+      await loadScript('assets/app.js?v=0.3.9');
+      await loadScript('painel-studio.js?v=0.3.9');
       addProfileControls(user);
       window.dispatchEvent(new Event('resize'));
     })().catch((error) => {
@@ -677,3 +677,4 @@ if (document.getElementById('auth-root')) {
 } else {
   initializePanelStudioAuth();
 }
+
