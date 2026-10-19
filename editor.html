@@ -5,6 +5,7 @@
 <link rel="stylesheet" href="assets/style.css?v=0.3.12"><link rel="stylesheet" href="assets/library-admin.css?v=0.3.11"></head>
 <body>
 <div id="authMessage" class="auth-message" role="status" aria-live="polite" hidden></div>
+<div id="authLoading" class="editor-loading" role="status" aria-live="polite"><span class="editor-loading-spinner" aria-hidden="true"></span><span>Carregando seus projetos...</span></div>
 <div id="studioShell" hidden>
 <header class="topbar"><div class="brand"><div class="logo">▦</div>Painel Studio</div><div class="divider"></div><div><span class="project-name" id="projectName" contenteditable="true" title="Clique para alterar o nome do projeto">Quadro de comando — QD-01</span><span class="saved" id="saveState">Salvo</span></div><div class="grow"></div><button class="btn" id="newBtn">＋ Novo</button><button class="btn" id="saveBtn">▣ Salvar</button><button class="btn primary" id="exportBtn">⇩ Exportar PNG</button></header>
 <main class="layout"><aside class="sidebar"><div class="side-head library-side-head"><span id="libraryTitle">Biblioteca</span><button class="btn library-manager-trigger" id="libraryManagerBtn" type="button" hidden>⚙ Gerenciar</button></div><div class="search"><input id="search" placeholder="Buscar componente..."></div><div id="library"></div><div class="section" style="border:0;margin-top:18px"><div class="field-label">Dica</div><div style="font-size:11px;line-height:1.55;color:#7c8798">Arraste um item para o painel ou clique nele. Componentes encaixam automaticamente no trilho DIN mais próximo.</div></div></aside>
@@ -16,5 +17,6 @@
  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
  <script src="assets/supabase-config.js"></script>
  <script src="assets/electro-logo-data.js"></script>
- <script src="assets/auth.js?v=0.3.15"></script>
+ <script src="assets/auth.js?v=0.3.16"></script>
 </body></html>
+

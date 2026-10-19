@@ -6,6 +6,7 @@ function initializePanelStudioAuth() {
   const submit = $('#authSubmit');
   const setupNotice = $('#authSetup');
   const message = $('#authMessage');
+  const loadingNotice = $('#authLoading');
   const signInTab = $('#signInTab');
   const signUpTab = $('#signUpTab');
   let mode = 'signin';
@@ -15,6 +16,10 @@ function initializePanelStudioAuth() {
   const queuedProjects = new Map();
   let queueTimer = null;
   let syncChain = Promise.resolve();
+
+  function hideLoadingNotice() {
+    if (loadingNotice) loadingNotice.hidden = true;
+  }
 
   function showMessage(text, kind = 'error') {
     if (!message) {
@@ -530,9 +535,11 @@ function initializePanelStudioAuth() {
       await loadScript('painel-studio.js?v=0.3.15');
       addProfileControls(user);
       window.dispatchEvent(new Event('resize'));
+      hideLoadingNotice();
     })().catch((error) => {
       bootPromise = null;
       studioShell.hidden = true;
+      hideLoadingNotice();
       showMessage(`Não foi possível carregar seus projetos. ${error.message}`, 'error');
     });
     return bootPromise;
@@ -574,6 +581,7 @@ function initializePanelStudioAuth() {
     client = supabaseApi.createClient(projectUrl, publicKey);
   } catch (error) {
     setupNotice.hidden = false;
+    hideLoadingNotice();
     submit.disabled = true;
     showMessage(`Confira a URL e a chave pública do arquivo de configuração. ${error.message}`);
     return;
@@ -677,3 +685,4 @@ if (document.getElementById('auth-root')) {
 } else {
   initializePanelStudioAuth();
 }
+
