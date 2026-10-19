@@ -479,6 +479,11 @@ function renderLibrary() {
 }
 
 function partSize(p, w=p.w, h=p.h) { return p.rot ? { w:h, h:w } : { w, h }; }
+function snapCenterToGrid(part,x,y,boardWidth,boardHeight){
+  const size=partSize(part),spacing=Math.max(5,Math.round(Number(gridSpacing)||10));
+  const snappedX=Math.round((x+size.w/2)/spacing)*spacing-size.w/2,snappedY=Math.round((y+size.h/2)/spacing)*spacing-size.h/2;
+  return {x:Math.max(-workspaceMargin,Math.min(boardWidth+workspaceMargin-size.w,snappedX)),y:Math.max(-workspaceMargin,Math.min(boardHeight+workspaceMargin-size.h,snappedY))};
+}
 const alignmentTolerance=3;
 function alignmentBounds(items){
   const bounds={left:Infinity,top:Infinity,right:-Infinity,bottom:-Infinity};
@@ -505,6 +510,7 @@ function bestAlignmentGuide(axis,movingBounds,targets){
     const crossGap=Math.max(0,Math.max(movingCrossStart,targetCrossStart)-Math.min(movingCrossEnd,targetCrossEnd));
     for(const movingAnchor of alignmentAnchors(movingStart,movingEnd))for(const targetAnchor of alignmentAnchors(targetStart,targetEnd)){
       const distance=Math.abs(movingAnchor.value-targetAnchor.value);if(distance>alignmentTolerance)continue;
+      if((movingAnchor.type==='center')!==(targetAnchor.type==='center'))continue;
       const sameAnchor=movingAnchor.type===targetAnchor.type?0:1;
       if(best&&(distance>best.distance+.001||(Math.abs(distance-best.distance)<=.001&&(crossGap>best.crossGap+.001||(Math.abs(crossGap-best.crossGap)<=.001&&sameAnchor>=best.sameAnchor)))))continue;
       const coordinate=(movingAnchor.value+targetAnchor.value)/2,[segmentStart,segmentEnd]=connectorSegment(movingCrossStart,movingCrossEnd,targetCrossStart,targetCrossEnd);
@@ -525,7 +531,7 @@ function decorateAlignmentGuides(){
     const line=guide.axis==='x'
       ?svgEl('line',{x1:guide.coordinate,y1:guide.segmentStart,x2:guide.coordinate,y2:guide.segmentEnd})
       :svgEl('line',{x1:guide.segmentStart,y1:guide.coordinate,x2:guide.segmentEnd,y2:guide.coordinate});
-    line.setAttribute('stroke','#e87524');line.setAttribute('stroke-width',String(1.5/scale));line.setAttribute('stroke-dasharray',`${5/scale} ${3/scale}`);line.setAttribute('stroke-linecap','round');line.setAttribute('opacity','.95');group.append(line);
+    line.setAttribute('stroke','#7bc98b');line.setAttribute('stroke-width',String(1/scale));line.setAttribute('stroke-dasharray',`${4/scale} ${3/scale}`);line.setAttribute('stroke-linecap','round');line.setAttribute('opacity','.95');group.append(line);
   }
   svg.append(group);
 }
@@ -893,7 +899,7 @@ svg.addEventListener('pointermove',e=>{
     else {p.x=nx;p.y=ny}
   }
   else if(d.items?.length>1){for(const item of d.items){const size=partSize(item.part);item.part.x=Math.max(-workspaceMargin,Math.min(w+workspaceMargin-size.w,Math.round((item.x+dx)/5)*5));item.part.y=Math.max(-workspaceMargin,Math.min(h+workspaceMargin-size.h,Math.round((item.y+dy)/5)*5))}}
-  else {const size=partSize(p),nx=Math.max(-workspaceMargin,Math.min(w+workspaceMargin-size.w,Math.round((d.x+dx)/5)*5)),ny=Math.max(-workspaceMargin,Math.min(h+workspaceMargin-size.h,Math.round((d.y+dy)/5)*5));p.x=nx;p.y=snapToRail(p,nx,ny)}
+  else {const snapped=snapCenterToGrid(p,d.x+dx,d.y+dy,w,h);p.x=snapped.x;p.y=snapToRail(p,snapped.x,snapped.y)}
   alignmentGuides=d.mode==='move'&&p.type!=='rail'?calculateAlignmentGuides(d.items?.length?d.items.map(item=>item.part):[p]):[];
   if(!dragRenderFrame)dragRenderFrame=requestAnimationFrame(()=>{dragRenderFrame=0;render()});
 },true);
