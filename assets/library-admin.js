@@ -101,7 +101,7 @@
       form.elements.categoryId.innerHTML = choices;
       const entries = components.filter((item) => !selectedCategoryId || item.category_id === selectedCategoryId);
       componentList.innerHTML = entries.length ? entries.map((item, index) => `
-        <article class="library-admin-component-row"><div class="library-admin-component-thumb">${item.image ? `<img src="${escapeHtml(item.image)}" alt="">` : `<span>${escapeHtml(item.icon || '▦')}</span>`}</div><div class="library-admin-component-info"><strong>${escapeHtml(item.name)}</strong><span>${item.width_mm} × ${item.height_mm} mm</span></div><div class="library-admin-row-actions"><button type="button" data-component-move="up" data-id="${escapeHtml(item.id)}" title="Mover para cima" aria-label="Mover ${escapeHtml(item.name)} para cima">↑</button><button type="button" data-component-move="down" data-id="${escapeHtml(item.id)}" title="Mover para baixo" aria-label="Mover ${escapeHtml(item.name)} para baixo">↓</button><button type="button" data-component-edit="${escapeHtml(item.id)}" title="Editar componente" aria-label="Editar ${escapeHtml(item.name)}">Editar</button><button type="button" class="is-danger" data-component-delete="${escapeHtml(item.id)}" aria-label="Excluir ${escapeHtml(item.name)}">${'<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6M10 11v5M14 11v5"/></svg>'}</button></div></article>`).join('') : '<div class="library-admin-empty">Nenhum componente nesta categoria.</div>';
+        <article class="library-admin-component-row"><div class="library-admin-component-thumb">${item.image ? `<img src="${escapeHtml(item.image)}" alt="">` : `<span>${escapeHtml(item.icon || '▦')}</span>`}</div><div class="library-admin-component-info"><strong>${escapeHtml(item.name)}</strong><span>${item.width_mm} × ${item.height_mm} mm</span></div><div class="library-admin-row-actions"><button type="button" data-component-move="up" data-id="${escapeHtml(item.id)}" title="Mover para cima" aria-label="Mover ${escapeHtml(item.name)} para cima">↑</button><button type="button" data-component-move="down" data-id="${escapeHtml(item.id)}" title="Mover para baixo" aria-label="Mover ${escapeHtml(item.name)} para baixo">↓</button><button type="button" data-component-duplicate="${escapeHtml(item.id)}" title="Duplicar componente" aria-label="Duplicar ${escapeHtml(item.name)}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 8V4h12v12h-4M4 8h12v12H4z"/></svg></button><button type="button" data-component-edit="${escapeHtml(item.id)}" title="Editar componente" aria-label="Editar ${escapeHtml(item.name)}">Editar</button><button type="button" class="is-danger" data-component-delete="${escapeHtml(item.id)}" aria-label="Excluir ${escapeHtml(item.name)}">${'<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6M10 11v5M14 11v5"/></svg>'}</button></div></article>`).join('') : '<div class="library-admin-empty">Nenhum componente nesta categoria.</div>';
       backdrop.querySelector('[data-action="add-subcategory"]').disabled = !selectedCategoryId || Boolean(selectedCategory?.parent_id);
     };
     const showForm = (component = null) => {
@@ -202,6 +202,26 @@
         const rows = sortRows(components.filter((item) => item.category_id === component.category_id));
         await moveInGroup(rows, component.id, move.dataset.componentMove, (row) => api.saveComponent(row)); return;
       }
+      const duplicateButton = event.target.closest('[data-component-duplicate]');
+      if (duplicateButton) {
+        const component = components.find((item) => item.id === duplicateButton.dataset.componentDuplicate);
+        if (!component) return;
+        const siblings = components.filter((item) => item.category_id === component.category_id);
+        const duplicate = {
+          ...component,
+          id: `part-${crypto.randomUUID()}`,
+          name: `${component.name} (cópia)`,
+          sort_order: Math.max(-1, ...siblings.map((item) => Number(item.sort_order) || 0)) + 1,
+          metadata: { ...(component.metadata || {}) }
+        };
+        setStatus('Duplicando componente…');
+        try {
+          await api.saveComponent(duplicate);
+          await refresh();
+          toast('Componente duplicado');
+        } catch (error) { setStatus(`Não foi possível duplicar o componente. ${error.message}`, true); }
+        return;
+      }
       const remove = event.target.closest('[data-component-delete]');
       if (remove) {
         const component = components.find((item) => item.id === remove.dataset.componentDelete);
@@ -249,3 +269,4 @@
     });
   };
 })();
+
