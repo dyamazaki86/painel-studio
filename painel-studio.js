@@ -10,6 +10,7 @@ transparentDragImage.src = 'data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAA
 let customDrag = null;
 let selectionBox = null;
 let dragRenderFrame = 0;
+let alignmentGuides = [];
 let copyBuffer = null;
 let showRulers = true;
 function historyState(){return {placed,panelW:$('#panelW').value,panelH:$('#panelH').value,panelName:$('#panelName').value,panelColor,gridSpacing,showGrid}}
@@ -185,6 +186,7 @@ window.render = function renderOverride() {
   decorateLocks();
   svg.querySelectorAll('g.part[data-id]').forEach(group=>{if(selectedIds.has(group.dataset.id))group.classList.add('selected')});
   if(selectedIds.size>1){const note=document.createElement('div');note.className='item-sub';note.style.cssText='padding:8px 17px 0;font-weight:600';note.textContent=`${selectedIds.size} componentes selecionados · Ctrl+clique para ajustar a seleção`;$('#properties').prepend(note)}
+  decorateAlignmentGuides();
 };
 function isTextBoxComponent(part){return part?.textBox===true||part?.id==='lid-id-plate'||/placa de identifica[çc][ãa]o/i.test(part?.name||'')}
 function decorateTextBoxes(){
@@ -477,6 +479,56 @@ function renderLibrary() {
 }
 
 function partSize(p, w=p.w, h=p.h) { return p.rot ? { w:h, h:w } : { w, h }; }
+const alignmentTolerance=3;
+function alignmentBounds(items){
+  const bounds={left:Infinity,top:Infinity,right:-Infinity,bottom:-Infinity};
+  for(const part of items){const size=partSize(part);bounds.left=Math.min(bounds.left,part.x);bounds.top=Math.min(bounds.top,part.y);bounds.right=Math.max(bounds.right,part.x+size.w);bounds.bottom=Math.max(bounds.bottom,part.y+size.h)}
+  return bounds;
+}
+function alignmentAnchors(start,end){return [{value:start,type:'edge-start'},{value:(start+end)/2,type:'center'},{value:end,type:'edge-end'}]}
+function connectorSegment(startA,endA,startB,endB){
+  if(endA<=startB)return [endA,startB];
+  if(endB<=startA)return [endB,startA];
+  const centerA=(startA+endA)/2,centerB=(startB+endB)/2;
+  if(Math.abs(centerA-centerB)>1)return [Math.min(centerA,centerB),Math.max(centerA,centerB)];
+  const middle=(Math.max(startA,startB)+Math.min(endA,endB))/2;
+  return [middle-3,middle+3];
+}
+function bestAlignmentGuide(axis,movingBounds,targets){
+  const vertical=axis==='x',movingStart=vertical?movingBounds.left:movingBounds.top,movingEnd=vertical?movingBounds.right:movingBounds.bottom;
+  const movingCrossStart=vertical?movingBounds.top:movingBounds.left,movingCrossEnd=vertical?movingBounds.bottom:movingBounds.right;
+  let best=null;
+  for(const target of targets){
+    const targetSize=partSize(target),targetBounds={left:target.x,top:target.y,right:target.x+targetSize.w,bottom:target.y+targetSize.h};
+    const targetStart=vertical?targetBounds.left:targetBounds.top,targetEnd=vertical?targetBounds.right:targetBounds.bottom;
+    const targetCrossStart=vertical?targetBounds.top:targetBounds.left,targetCrossEnd=vertical?targetBounds.bottom:targetBounds.right;
+    const crossGap=Math.max(0,Math.max(movingCrossStart,targetCrossStart)-Math.min(movingCrossEnd,targetCrossEnd));
+    for(const movingAnchor of alignmentAnchors(movingStart,movingEnd))for(const targetAnchor of alignmentAnchors(targetStart,targetEnd)){
+      const distance=Math.abs(movingAnchor.value-targetAnchor.value);if(distance>alignmentTolerance)continue;
+      const sameAnchor=movingAnchor.type===targetAnchor.type?0:1;
+      if(best&&(distance>best.distance+.001||(Math.abs(distance-best.distance)<=.001&&(crossGap>best.crossGap+.001||(Math.abs(crossGap-best.crossGap)<=.001&&sameAnchor>=best.sameAnchor)))))continue;
+      const coordinate=(movingAnchor.value+targetAnchor.value)/2,[segmentStart,segmentEnd]=connectorSegment(movingCrossStart,movingCrossEnd,targetCrossStart,targetCrossEnd);
+      best={axis,coordinate,segmentStart,segmentEnd,distance,crossGap,sameAnchor};
+    }
+  }
+  return best;
+}
+function calculateAlignmentGuides(items){
+  if(!items?.length)return [];
+  const moving=new Set(items),bounds=alignmentBounds(items),targets=placed.filter(part=>part.type!=='rail'&&!moving.has(part));
+  return [bestAlignmentGuide('x',bounds,targets),bestAlignmentGuide('y',bounds,targets)].filter(Boolean);
+}
+function decorateAlignmentGuides(){
+  if(!alignmentGuides.length)return;
+  const group=svgEl('g',{class:'alignment-guides','pointer-events':'none','aria-hidden':'true'});
+  for(const guide of alignmentGuides){
+    const line=guide.axis==='x'
+      ?svgEl('line',{x1:guide.coordinate,y1:guide.segmentStart,x2:guide.coordinate,y2:guide.segmentEnd})
+      :svgEl('line',{x1:guide.segmentStart,y1:guide.coordinate,x2:guide.segmentEnd,y2:guide.coordinate});
+    line.setAttribute('stroke','#e87524');line.setAttribute('stroke-width',String(1.5/scale));line.setAttribute('stroke-dasharray',`${5/scale} ${3/scale}`);line.setAttribute('stroke-linecap','round');line.setAttribute('opacity','.95');group.append(line);
+  }
+  svg.append(group);
+}
 function canOccupy(part, x, y, width=part.w, height=part.h) {
   const size=partSize(part,width,height), panelSize=panel();
   if (x < -workspaceMargin || y < -workspaceMargin || x+size.w > panelSize.w+workspaceMargin || y+size.h > panelSize.h+workspaceMargin) return false;
@@ -842,6 +894,7 @@ svg.addEventListener('pointermove',e=>{
   }
   else if(d.items?.length>1){for(const item of d.items){const size=partSize(item.part);item.part.x=Math.max(-workspaceMargin,Math.min(w+workspaceMargin-size.w,Math.round((item.x+dx)/5)*5));item.part.y=Math.max(-workspaceMargin,Math.min(h+workspaceMargin-size.h,Math.round((item.y+dy)/5)*5))}}
   else {const size=partSize(p),nx=Math.max(-workspaceMargin,Math.min(w+workspaceMargin-size.w,Math.round((d.x+dx)/5)*5)),ny=Math.max(-workspaceMargin,Math.min(h+workspaceMargin-size.h,Math.round((d.y+dy)/5)*5));p.x=nx;p.y=snapToRail(p,nx,ny)}
+  alignmentGuides=d.mode==='move'&&p.type!=='rail'?calculateAlignmentGuides(d.items?.length?d.items.map(item=>item.part):[p]):[];
   if(!dragRenderFrame)dragRenderFrame=requestAnimationFrame(()=>{dragRenderFrame=0;render()});
 },true);
 svg.addEventListener('pointerup',e=>{
@@ -860,7 +913,7 @@ svg.addEventListener('pointerup',e=>{
     }else if(!box.additive){selected=null;selectedIds.clear();selectedLibraryId=null;libraryTargetRailId=null;document.querySelectorAll('#library .item').forEach(item=>item.classList.remove('selected'))}
     render();return;
   }
-  const d=customDrag;if(!d)return;customDrag=null;
+  const d=customDrag;if(!d)return;customDrag=null;alignmentGuides=[];
   if(dragRenderFrame){cancelAnimationFrame(dragRenderFrame);dragRenderFrame=0}
   if(d.p.type!=='rail'&&d.mode==='move'){
     if(d.items?.length>1)nearestFreeGroupOffset(d.items);
